@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/icon.svg" alt="GTD App Icon" width="104" height="104" />
+</p>
+
 # 🧭 GTD App — Getting Things Done® Productivity System
 
 > A modern, offline-first GTD productivity web application featuring interactive Horizons of Focus visualization, contextual next action tracking, guided weekly reviews, and granular two-way Google Sheets synchronization.

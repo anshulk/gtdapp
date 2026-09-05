@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Minimal Dark Background with Rounded Squircle -->
+  <rect width="512" height="512" rx="128" fill="#12100E" stroke="#2B241B" stroke-width="12" />
+
+  <!-- Bold Clean Compass Ring -->
+  <circle cx="256" cy="256" r="176" fill="none" stroke="#C5A47E" stroke-width="20" />
+
+  <!-- 4-Point High-Contrast Needle Elements -->
+  <!-- North Arrow (Primary High-Contrast Accent) -->
+  <polygon points="256,84 256,256 200,256" fill="#FFF2DE" />
+  <polygon points="256,84 312,256 256,256" fill="#C5A47E" />
+
+  <!-- South Arrow (Muted Shadow Accent) -->
+  <polygon points="256,428 200,256 256,256" fill="#5C4733" />
+  <polygon points="256,428 256,256 312,256" fill="#382B1E" />
+
+  <!-- East Arrow Wing -->
+  <polygon points="428,256 256,200 256,256" fill="#E6CAAA" />
+  <polygon points="428,256 256,256 256,312" fill="#382B1E" />
+
+  <!-- West Arrow Wing -->
+  <polygon points="84,256 256,256 256,200" fill="#C5A47E" />
+  <polygon points="84,256 256,312 256,256" fill="#5C4733" />
+
+  <!-- Center Pivot Core Hub -->
+  <circle cx="256" cy="256" r="40" fill="#12100E" stroke="#C5A47E" stroke-width="10" />
+  <circle cx="256" cy="256" r="16" fill="#FFF2DE" />
+</svg>
