@@ -12,6 +12,24 @@ Designed with an elegant dark luxury theme (warm neutrals, obsidian surfaces, an
 
 ---
 
+## 📸 App Preview & Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/horizons-matrix-desktop.png" alt="GTD Horizons of Focus Altitude Matrix (Desktop)" width="100%" />
+  <br />
+  <em>Desktop View: The 4-Column Horizons of Focus Matrix organizing H5 Purpose &amp; H4 Vision, H2 Areas of Focus, H3 1–2Y Goals, and H1 Projects &amp; Runway actions with active vertical alignment indicators.</em>
+</p>
+
+<br />
+
+<p align="center">
+  <img src="docs/screenshots/cockpit-mobile.png" alt="GTD Flight Control Cockpit (Mobile)" width="380" />
+  <br />
+  <em>Mobile View: Responsive Flight Control Cockpit displaying real-time horizon item tallies, weekly review status badges, and one-tap quick capture dock.</em>
+</p>
+
+---
+
 ## 🚀 Key Features
 
 ### 1. 🏔️ Horizons of Focus (All 6 Altitudes)

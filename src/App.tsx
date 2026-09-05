@@ -78,66 +78,22 @@ const MainAppContent: React.FC = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-8 pb-28 md:pb-12">
-        <AnimatePresence mode="wait">
-          {activeTab === 'dashboard' && (
-            <motion.div
-              key="dashboard"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.16, ease: 'easeOut' }}
-            >
-              <DashboardView />
-            </motion.div>
-          )}
-
-          {activeTab === 'horizons' && (
-            <motion.div
-              key="horizons"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.16, ease: 'easeOut' }}
-            >
-              <HorizonsView />
-            </motion.div>
-          )}
-
-          {activeTab === 'projects' && (
-            <motion.div
-              key="projects"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.16, ease: 'easeOut' }}
-            >
-              <ProjectsView />
-            </motion.div>
-          )}
-
-          {(activeTab === 'actions' || activeTab === 'inbox' || activeTab === 'waiting' || activeTab === 'someday') && (
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.16, ease: 'easeOut' }}
-            >
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.16, ease: 'easeOut' }}
+          >
+            {activeTab === 'dashboard' && <DashboardView />}
+            {activeTab === 'horizons' && <HorizonsView />}
+            {activeTab === 'projects' && <ProjectsView />}
+            {(activeTab === 'actions' || activeTab === 'inbox' || activeTab === 'waiting' || activeTab === 'someday') && (
               <NextActionsView initialSubTab={activeTab === 'actions' ? 'actions' : activeTab} />
-            </motion.div>
-          )}
-
-          {activeTab === 'reviews' && (
-            <motion.div
-              key="reviews"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.16, ease: 'easeOut' }}
-            >
-              <ReviewsView />
-            </motion.div>
-          )}
+            )}
+            {activeTab === 'reviews' && <ReviewsView />}
+          </motion.div>
         </AnimatePresence>
       </main>
 
