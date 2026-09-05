@@ -1,0 +1,6 @@
+{
+  "name": "GTD App",
+  "description": "Getting Things Done (GTD) productivity system for managing Horizons of Focus, active projects, contextual next actions, and weekly reviews.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

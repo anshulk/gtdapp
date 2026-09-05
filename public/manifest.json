@@ -1,0 +1,104 @@
+{
+  "id": "/?source=pwa",
+  "name": "GTD App",
+  "short_name": "GTD App",
+  "description": "Getting Things Done (GTD) productivity system for managing Horizons of Focus, active projects, contextual next actions, and weekly reviews.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "any",
+  "background_color": "#0F0F0F",
+  "theme_color": "#0F0F0F",
+  "categories": [
+    "productivity",
+    "utilities",
+    "business"
+  ],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Quick Capture",
+      "short_name": "Capture",
+      "description": "Quickly capture a thought or task to your GTD Inbox",
+      "url": "/?action=capture",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Weekly Review",
+      "short_name": "Review",
+      "description": "Launch guided GTD Weekly Review wizard",
+      "url": "/?tab=reviews&action=review",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Next Actions",
+      "short_name": "Actions",
+      "description": "View contextual next actions list",
+      "url": "/?tab=actions",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Horizons of Focus",
+      "short_name": "Horizons",
+      "description": "View Horizons of Focus (Ground to 50,000 ft)",
+      "url": "/?tab=horizons",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}
