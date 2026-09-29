@@ -477,6 +477,46 @@ export const INITIAL_ACTIONS: GTDAction[] = [
     createdAt: '2026-08-26',
   },
 
+  // Recurring Routines
+  {
+    id: 'act-rec-1',
+    title: 'Daily 20-min presence & core mobility routine',
+    projectId: 'proj-2',
+    tags: ['@home', 'health', 'routine'],
+    type: 'action',
+    completed: false,
+    priority: 'high',
+    isRecurring: true,
+    recurrence: {
+      targetCount: 1,
+      period: 'day',
+      label: 'Daily',
+    },
+    completionHistory: [],
+    streakCount: 3,
+    bestStreak: 12,
+    createdAt: '2026-08-20',
+  },
+  {
+    id: 'act-rec-2',
+    title: 'Review system telemetry & benchmark logs (3x/week)',
+    projectId: 'proj-1',
+    tags: ['@computer', 'deep-work', 'routine'],
+    type: 'action',
+    completed: false,
+    priority: 'medium',
+    isRecurring: true,
+    recurrence: {
+      targetCount: 3,
+      period: 'week',
+      label: '3x / week',
+    },
+    completionHistory: [],
+    streakCount: 2,
+    bestStreak: 5,
+    createdAt: '2026-08-20',
+  },
+
   // Waiting For Items
   {
     id: 'act-wf-1',

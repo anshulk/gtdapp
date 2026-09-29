@@ -26,11 +26,13 @@ import {
   Edit3,
   Tag,
   Search,
+  Flame,
   X
 } from 'lucide-react';
 import { useGTD } from '../context/GTDContext';
 import { HORIZON_DEFINITIONS } from '../data/gtdData';
 import { GTDAction, GTDProject } from '../types/gtd';
+import { getActionStreakInfo, formatDateKey } from '../utils/streakUtils';
 import { ActionEditModal } from './ActionEditModal';
 import { CockpitSpiderChart } from './CockpitSpiderChart';
 
@@ -82,10 +84,15 @@ export const DashboardView: React.FC = () => {
     };
   }, []);
 
-  // Filtered Next Actions for the "What to do right now" engine
+  // Filtered Next Actions for the "What to do right now" engine (including recurring actions)
   const actionableItems = useMemo(() => {
     return actions.filter((act) => {
-      if (act.type !== 'action' || act.completed) return false;
+      const isAction = act.type === 'action' || Boolean(act.isRecurring);
+      if (!isAction) return false;
+
+      // Regular actions hide when completed; recurring routines remain visible in cockpit
+      if (act.completed && !act.isRecurring) return false;
+
       if (selectedTag !== 'all') {
         if (selectedTag === 'untagged') {
           if (act.tags && act.tags.length > 0) return false;
@@ -109,15 +116,18 @@ export const DashboardView: React.FC = () => {
 
   const tagSuggestions = useMemo<TagSuggestion[]>(() => {
     const q = tagSearchQuery.trim().toLowerCase();
-    const totalActive = actions.filter((a) => a.type === 'action' && !a.completed).length;
+    const isActActive = (a: GTDAction) =>
+      (a.type === 'action' || Boolean(a.isRecurring)) && (!a.completed || Boolean(a.isRecurring));
+
+    const totalActive = actions.filter(isActActive).length;
     const untaggedCount = actions.filter(
-      (a) => a.type === 'action' && !a.completed && (!a.tags || a.tags.length === 0)
+      (a) => isActActive(a) && (!a.tags || a.tags.length === 0)
     ).length;
 
     // Calculate count per tag from active next actions
     const tagCountMap = new Map<string, number>();
     actions.forEach((a) => {
-      if (a.type === 'action' && !a.completed && a.tags) {
+      if (isActActive(a) && a.tags) {
         a.tags.forEach((t) => {
           const lower = t.toLowerCase();
           tagCountMap.set(lower, (tagCountMap.get(lower) || 0) + 1);
@@ -822,17 +832,17 @@ export const DashboardView: React.FC = () => {
                   return (
                     <div
                       key={group.id}
-                      className="bg-[#121212] rounded-xl border border-[#242424] overflow-hidden transition-all shadow-xs"
+                      className="bg-[#121212] rounded-lg border border-[#242424] overflow-hidden transition-all shadow-xs"
                     >
                       {/* Project Header */}
                       <div
                         onClick={() => toggleProjectCollapse(group.id)}
-                        className="px-3.5 py-2.5 bg-[#171717] hover:bg-[#1c1c1c] border-b border-[#222222] flex flex-wrap items-center justify-between gap-2.5 cursor-pointer select-none transition-colors"
+                        className="px-3 py-2 bg-[#161616] hover:bg-[#1a1a1a] border-b border-[#222222] flex items-center justify-between gap-2 cursor-pointer select-none transition-colors"
                       >
-                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
                           <button
                             type="button"
-                            className="text-gray-400 hover:text-white p-0.5 rounded transition-transform"
+                            className="text-gray-400 hover:text-white p-0.5 rounded transition-transform shrink-0"
                           >
                             {isCollapsed ? (
                               <ChevronRight className="w-4 h-4 text-gray-400" />
@@ -841,195 +851,181 @@ export const DashboardView: React.FC = () => {
                             )}
                           </button>
 
-                          <div className="p-1 rounded-md bg-[#222] border border-[#2a2a2a] text-[#C5A47E] shrink-0">
-                            {group.isStandalone ? (
-                              <CheckSquare className="w-3.5 h-3.5" />
-                            ) : (
-                              <Briefcase className="w-3.5 h-3.5" />
+                          <div className="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
+                            <span className="text-xs sm:text-sm font-bold text-white tracking-wide truncate">
+                              {group.title}
+                            </span>
+
+                            {group.goalTitle && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#C5A47E]/10 border border-[#C5A47E]/20 text-[#C5A47E] truncate max-w-[140px]">
+                                H3: {group.goalTitle}
+                              </span>
+                            )}
+                            {group.areaTitle && !group.goalTitle && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/40 border border-emerald-800/30 text-emerald-300 truncate max-w-[140px]">
+                                H2: {group.areaTitle}
+                              </span>
                             )}
                           </div>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs sm:text-sm font-bold text-white tracking-wide truncate">
-                                {group.title}
-                              </span>
-
-                              {group.goalTitle && (
-                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#C5A47E]/10 border border-[#C5A47E]/20 text-[#C5A47E] truncate max-w-[150px]">
-                                  H3: {group.goalTitle}
-                                </span>
-                              )}
-                              {group.areaTitle && !group.goalTitle && (
-                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/40 border border-emerald-800/30 text-emerald-300 truncate max-w-[150px]">
-                                  H2: {group.areaTitle}
-                                </span>
-                              )}
-                            </div>
-                          </div>
                         </div>
 
-                        {/* Count & Details link & Add Action CTA */}
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#202020] border border-[#2a2a2a] text-gray-300">
-                            {group.actions.length} {group.actions.length === 1 ? 'action' : 'actions'}
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setCollapsedProjectIds((prev) => {
-                                const next = new Set(prev);
-                                next.delete(group.id);
-                                return next;
-                              });
-                              setTimeout(() => {
-                                const el = document.getElementById(`project-action-input-${group.id}`);
-                                el?.focus();
-                              }, 50);
-                            }}
-                            className="flex items-center gap-1 text-[11px] font-bold text-[#C5A47E] hover:text-black bg-[#C5A47E]/10 hover:bg-[#C5A47E] border border-[#C5A47E]/30 px-2 py-0.5 rounded-md transition-all cursor-pointer"
-                            title={`Add action to ${group.title}`}
-                          >
-                            <Plus className="w-3 h-3 stroke-[2.5]" />
-                            <span>Action</span>
-                          </button>
-
-                          {!group.isStandalone && group.project && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedProjectId(group.project!.id);
-                                setActiveTab('projects');
-                              }}
-                              className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-gray-400 hover:text-[#C5A47E] px-2 py-0.5 rounded hover:bg-[#222] transition-colors cursor-pointer"
-                              title="View project details"
-                            >
-                              <span>Details</span>
-                              <ArrowRight className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
+                        {/* Add Action CTA (no action counts, no details button, no project icon) */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCollapsedProjectIds((prev) => {
+                              const next = new Set(prev);
+                              next.delete(group.id);
+                              return next;
+                            });
+                            setTimeout(() => {
+                              const el = document.getElementById(`project-action-input-${group.id}`);
+                              el?.focus();
+                            }, 50);
+                          }}
+                          className="flex items-center gap-1 text-[11px] font-bold text-[#C5A47E] hover:text-black bg-[#C5A47E]/10 hover:bg-[#C5A47E] border border-[#C5A47E]/30 px-2 py-0.5 rounded-md transition-all cursor-pointer shrink-0"
+                          title={`Add action to ${group.title}`}
+                        >
+                          <Plus className="w-3 h-3 stroke-[2.5]" />
+                          <span>Action</span>
+                        </button>
                       </div>
 
                       {/* Action Cards under Project */}
                       {!isCollapsed && (
-                        <div className="p-2.5 sm:p-3 space-y-2.5 bg-[#121212]">
-                          {group.actions.length === 0 ? (
-                            <div className="p-3 text-center text-xs text-gray-400 bg-[#161616] rounded-lg border border-dashed border-[#262626]">
-                              No active next actions for this project. Add an immediate physical action below to keep it moving.
-                            </div>
-                          ) : (
-                            group.actions.map((action) => {
-                              const linkedProject = projects.find((p) => p.id === action.projectId);
-                              return (
-                                <div
-                                  key={action.id}
-                                  className="bg-[#141414] p-3.5 rounded-xl border border-[#242424] hover:border-[#333333] shadow-xs transition-all flex items-start justify-between gap-3 group"
-                                >
-                                  <div className="flex items-start gap-3 flex-1 min-w-0">
-                                    <button
-                                      onClick={() => toggleActionComplete(action.id)}
-                                      className="mt-0.5 w-4.5 h-4.5 rounded-md border border-neutral-600 hover:border-[#C5A47E] flex items-center justify-center text-transparent hover:text-[#C5A47E] transition-colors shrink-0 cursor-pointer"
-                                      title="Mark Next Action Complete"
-                                    >
-                                      <Check className="w-3 h-3" />
-                                    </button>
+                        <div className="p-2 space-y-1.5 bg-[#121212]">
+                          {group.actions.map((action) => {
+                            const streak = action.isRecurring ? getActionStreakInfo(action) : null;
+                            const isCompletedToday = Boolean(streak?.completedToday);
+                            const isDone = action.isRecurring ? isCompletedToday : Boolean(action.completed);
 
-                                    <div className="space-y-1.5 flex-1 min-w-0">
-                                      <p 
-                                        onClick={() => setEditingAction(action)}
-                                        className="text-sm font-semibold text-gray-200 leading-snug break-words cursor-pointer hover:text-[#C5A47E] transition-colors"
-                                      >
-                                        {action.title}
-                                      </p>
-
-                                      {/* Tags only shown when showTags toggle is active */}
-                                      {showTags && action.tags && action.tags.length > 0 && (
-                                        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                                          {action.tags.map((tag) => {
-                                            const isContextTag = tag.startsWith('@');
-                                            const isSelected = selectedTag.toLowerCase() === tag.toLowerCase();
-                                            return (
-                                              <button
-                                                key={tag}
-                                                type="button"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  if (isSelected) {
-                                                    setSelectedTag('all');
-                                                    setTagSearchQuery('');
-                                                  } else {
-                                                    setSelectedTag(tag);
-                                                    setTagSearchQuery(tag);
-                                                  }
-                                                }}
-                                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border transition-colors cursor-pointer ${
-                                                  isSelected
-                                                    ? 'bg-[#C5A47E] text-black font-bold border-[#C5A47E]'
-                                                    : isContextTag
-                                                    ? 'bg-[#C5A47E]/10 text-[#E0C7A8] border-[#C5A47E]/30 hover:border-[#C5A47E]'
-                                                    : 'bg-[#1E1E1E] text-gray-300 border-[#2D2D2D] hover:border-gray-500'
-                                                }`}
-                                                title={`Filter by tag: ${tag}`}
-                                              >
-                                                <Tag className="w-2.5 h-2.5 opacity-60" />
-                                                <span>{tag}</span>
-                                              </button>
-                                            );
-                                          })}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-
+                            return (
+                              <div
+                                key={action.id}
+                                className={`py-1.5 px-2.5 rounded-lg border transition-all flex items-center justify-between gap-2.5 group ${
+                                  action.isRecurring
+                                    ? isDone
+                                      ? 'bg-[#151515] border-[#222222] opacity-80'
+                                      : 'bg-[#161616] border-amber-900/30 hover:border-amber-700/50'
+                                    : 'bg-[#151515] hover:bg-[#181818] border-[#222222] hover:border-[#333333]'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 flex-1 min-w-0">
                                   <button
                                     type="button"
-                                    onClick={() => setEditingAction(action)}
-                                    className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-[#C5A47E] hover:bg-[#1E1E1E] rounded-lg transition-all cursor-pointer shrink-0"
-                                    title="Edit Action"
+                                    onClick={() => toggleActionComplete(action.id)}
+                                    className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shrink-0 cursor-pointer ${
+                                      isDone
+                                        ? 'bg-[#C5A47E] border-[#C5A47E] text-black'
+                                        : 'border-neutral-600 hover:border-[#C5A47E] text-transparent hover:text-[#C5A47E]'
+                                    }`}
+                                    title={
+                                      action.isRecurring
+                                        ? isCompletedToday
+                                          ? 'Completed today (click to undo)'
+                                          : 'Log completion for today'
+                                        : 'Mark complete'
+                                    }
                                   >
-                                    <Edit3 className="w-3.5 h-3.5" />
+                                    <Check className="w-2.5 h-2.5 stroke-[3]" />
                                   </button>
-                                </div>
-                              );
-                            })
-                          )}
 
-                          {/* Inline Add Action Row for this Project */}
-                          <div className="pt-2 border-t border-[#1F1F1F] flex items-center gap-2">
-                            <div className="relative flex-1">
-                              <input
-                                id={`project-action-input-${group.id}`}
-                                type="text"
-                                value={newActionInput[group.id] || ''}
-                                onChange={(e) =>
-                                  setNewActionInput((prev) => ({ ...prev, [group.id]: e.target.value }))
+                                  <span
+                                    onClick={() => setEditingAction(action)}
+                                    className={`text-xs sm:text-sm font-medium leading-tight truncate hover:text-[#C5A47E] cursor-pointer transition-colors ${
+                                      isDone ? 'text-gray-400' : 'text-gray-200'
+                                    }`}
+                                    title={action.title}
+                                  >
+                                    {action.title}
+                                  </span>
+
+                                  {/* Compact Streak/Recurring indicator */}
+                                  {action.isRecurring && streak && (
+                                    <span
+                                      className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border shrink-0 ${
+                                        isCompletedToday
+                                          ? 'bg-emerald-950/40 border-emerald-800/30 text-emerald-400'
+                                          : 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+                                      }`}
+                                      title={`Target: ${action.recurrence?.label || 'Recurring routine'}`}
+                                    >
+                                      <Flame className="w-2.5 h-2.5 text-orange-400 fill-orange-400/20" />
+                                      <span>
+                                        {streak.currentStreak > 0
+                                          ? `${streak.currentStreak}d`
+                                          : action.recurrence?.label || 'Recurring'}
+                                      </span>
+                                      {isCompletedToday && <span className="text-[9px] font-bold">✓</span>}
+                                    </span>
+                                  )}
+
+                                  {/* Compact Due Date indicator */}
+                                  {action.dueDate && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-950/40 border border-rose-800/30 text-rose-300 shrink-0">
+                                      <Clock className="w-2.5 h-2.5" />
+                                      <span>{action.dueDate}</span>
+                                    </span>
+                                  )}
+
+                                  {/* Tags only shown when showTags toggle is active */}
+                                  {showTags && action.tags && action.tags.length > 0 && (
+                                    <div className="flex items-center gap-1 shrink-0 overflow-hidden">
+                                      {action.tags.slice(0, 3).map((tag) => (
+                                        <span
+                                          key={tag}
+                                          className="text-[10px] px-1.5 py-0.2 rounded bg-[#1e1e1e] border border-[#2b2b2b] text-gray-400"
+                                        >
+                                          {tag}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingAction(action)}
+                                  className="opacity-0 group-hover:opacity-100 p-1 text-gray-500 hover:text-[#C5A47E] rounded transition-opacity cursor-pointer shrink-0"
+                                  title="Edit Action"
+                                >
+                                  <Edit3 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            );
+                          })}
+
+                          {/* Compact Inline Add Action Row */}
+                          <div className="pt-1.5 border-t border-[#1C1C1C] flex items-center gap-1.5">
+                            <input
+                              id={`project-action-input-${group.id}`}
+                              type="text"
+                              value={newActionInput[group.id] || ''}
+                              onChange={(e) =>
+                                setNewActionInput((prev) => ({ ...prev, [group.id]: e.target.value }))
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddProjectNextAction(group.id, group.isStandalone);
                                 }
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    handleAddProjectNextAction(group.id, group.isStandalone);
-                                  }
-                                }}
-                                placeholder={`+ Add next action for ${group.isStandalone ? 'standalone' : group.title}...`}
-                                className="w-full text-xs px-3 py-2 bg-[#161616] border border-[#262626] hover:border-[#383838] focus:border-[#C5A47E] focus:outline-hidden rounded-lg text-gray-200 placeholder-gray-500 transition-colors"
-                              />
-                            </div>
+                              }}
+                              placeholder={`+ Add next action for ${group.isStandalone ? 'standalone' : group.title}...`}
+                              className="flex-1 text-xs px-2.5 py-1.5 bg-[#161616] border border-[#242424] hover:border-[#333] focus:border-[#C5A47E] focus:outline-hidden rounded-md text-gray-200 placeholder-gray-500 transition-colors"
+                            />
                             <button
                               type="button"
                               onClick={() => handleAddProjectNextAction(group.id, group.isStandalone)}
                               disabled={!newActionInput[group.id]?.trim()}
-                              className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                              className={`px-2.5 py-1.5 rounded-md text-xs font-bold flex items-center gap-1 transition-all ${
                                 newActionInput[group.id]?.trim()
                                   ? 'bg-[#C5A47E] text-black hover:bg-[#d4b48d] cursor-pointer shadow-xs'
-                                  : 'bg-[#1C1C1C] text-gray-500 cursor-not-allowed border border-[#262626]'
+                                  : 'bg-[#1C1C1C] text-gray-500 cursor-not-allowed border border-[#242424]'
                               }`}
                               title="Add Action"
                             >
-                              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                              <Plus className="w-3 h-3 stroke-[2.5]" />
                               <span>Add</span>
                             </button>
                           </div>
@@ -1041,88 +1037,119 @@ export const DashboardView: React.FC = () => {
               </div>
             ) : (
               /* Flat Action List View */
-              <div className="space-y-2.5">
+              <div className="space-y-1.5">
                 {actionableItems.map((action) => {
                   const linkedProject = projects.find((p) => p.id === action.projectId);
+                  const streak = action.isRecurring ? getActionStreakInfo(action) : null;
+                  const isCompletedToday = Boolean(streak?.completedToday);
+                  const isDone = action.isRecurring ? isCompletedToday : Boolean(action.completed);
+
                   return (
                     <div
                       key={action.id}
-                      className="bg-[#141414] p-3.5 rounded-xl border border-[#242424] hover:border-[#333333] shadow-xs transition-all flex items-start justify-between gap-3 group"
+                      className={`py-1.5 px-2.5 rounded-lg border transition-all flex items-center justify-between gap-2.5 group ${
+                        action.isRecurring
+                          ? isDone
+                            ? 'bg-[#151515] border-[#222222] opacity-80'
+                            : 'bg-[#161616] border-amber-900/30 hover:border-amber-700/50'
+                          : 'bg-[#151515] hover:bg-[#181818] border-[#222222] hover:border-[#333333]'
+                      }`}
                     >
-                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div className="flex items-center gap-2.5 flex-1 min-w-0">
                         <button
+                          type="button"
                           onClick={() => toggleActionComplete(action.id)}
-                          className="mt-0.5 w-4.5 h-4.5 rounded-md border border-neutral-600 hover:border-[#C5A47E] flex items-center justify-center text-transparent hover:text-[#C5A47E] transition-colors shrink-0 cursor-pointer"
-                          title="Mark Next Action Complete"
+                          className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shrink-0 cursor-pointer ${
+                            isDone
+                              ? 'bg-[#C5A47E] border-[#C5A47E] text-black'
+                              : 'border-neutral-600 hover:border-[#C5A47E] text-transparent hover:text-[#C5A47E]'
+                          }`}
+                          title={
+                            action.isRecurring
+                              ? isCompletedToday
+                                ? 'Completed today (click to undo)'
+                                : 'Log completion for today'
+                              : 'Mark complete'
+                          }
                         >
-                          <Check className="w-3 h-3" />
+                          <Check className="w-2.5 h-2.5 stroke-[3]" />
                         </button>
 
-                        <div className="space-y-1.5 flex-1 min-w-0">
-                          <p 
-                            onClick={() => setEditingAction(action)}
-                            className="text-sm font-semibold text-gray-200 leading-snug break-words cursor-pointer hover:text-[#C5A47E] transition-colors"
+                        <span
+                          onClick={() => setEditingAction(action)}
+                          className={`text-xs sm:text-sm font-medium leading-tight truncate hover:text-[#C5A47E] cursor-pointer transition-colors ${
+                            isDone ? 'text-gray-400' : 'text-gray-200'
+                          }`}
+                          title={action.title}
+                        >
+                          {action.title}
+                        </span>
+
+                        {/* Linked project name without briefcase icon */}
+                        {linkedProject && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedProjectId(linkedProject.id);
+                              setActiveTab('projects');
+                            }}
+                            className="text-[11px] text-gray-400 hover:text-[#C5A47E] font-medium truncate max-w-[140px] shrink-0 transition-colors"
+                            title={`Project: ${linkedProject.title}`}
                           >
-                            {action.title}
-                          </p>
+                            {linkedProject.title}
+                          </button>
+                        )}
 
-                          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                            {/* Tags only shown when showTags toggle is active */}
-                            {showTags && action.tags && action.tags.length > 0 && action.tags.map((tag) => {
-                              const isContextTag = tag.startsWith('@');
-                              const isSelected = selectedTag.toLowerCase() === tag.toLowerCase();
-                              return (
-                                <button
-                                  key={tag}
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (isSelected) {
-                                      setSelectedTag('all');
-                                      setTagSearchQuery('');
-                                    } else {
-                                      setSelectedTag(tag);
-                                      setTagSearchQuery(tag);
-                                    }
-                                  }}
-                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border transition-colors cursor-pointer ${
-                                    isSelected
-                                      ? 'bg-[#C5A47E] text-black font-bold border-[#C5A47E]'
-                                      : isContextTag
-                                      ? 'bg-[#C5A47E]/10 text-[#E0C7A8] border-[#C5A47E]/30 hover:border-[#C5A47E]'
-                                      : 'bg-[#1E1E1E] text-gray-300 border-[#2D2D2D] hover:border-gray-500'
-                                  }`}
-                                  title={`Filter by tag: ${tag}`}
-                                >
-                                  <Tag className="w-2.5 h-2.5 opacity-60" />
-                                  <span>{tag}</span>
-                                </button>
-                              );
-                            })}
+                        {/* Recurring Streak Badge */}
+                        {action.isRecurring && streak && (
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border shrink-0 ${
+                              isCompletedToday
+                                ? 'bg-emerald-950/40 border-emerald-800/30 text-emerald-400'
+                                : 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+                            }`}
+                            title={`Target: ${action.recurrence?.label || 'Recurring routine'}`}
+                          >
+                            <Flame className="w-2.5 h-2.5 text-orange-400 fill-orange-400/20" />
+                            <span>
+                              {streak.currentStreak > 0
+                                ? `${streak.currentStreak}d`
+                                : action.recurrence?.label || 'Recurring'}
+                            </span>
+                            {isCompletedToday && <span className="text-[9px] font-bold">✓</span>}
+                          </span>
+                        )}
 
-                            {linkedProject && (
-                              <button
-                                onClick={() => {
-                                  setSelectedProjectId(linkedProject.id);
-                                  setActiveTab('projects');
-                                }}
-                                className="text-gray-400 hover:text-[#C5A47E] flex items-center gap-1 font-medium group-hover:text-gray-300 transition-colors truncate max-w-[160px]"
+                        {/* Due date */}
+                        {action.dueDate && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-950/40 border border-rose-800/30 text-rose-300 shrink-0">
+                            <Clock className="w-2.5 h-2.5" />
+                            <span>{action.dueDate}</span>
+                          </span>
+                        )}
+
+                        {/* Tags if showTags is true */}
+                        {showTags && action.tags && action.tags.length > 0 && (
+                          <div className="flex items-center gap-1 shrink-0 overflow-hidden">
+                            {action.tags.slice(0, 3).map((tag) => (
+                              <span
+                                key={tag}
+                                className="text-[10px] px-1.5 py-0.2 rounded bg-[#1e1e1e] border border-[#2b2b2b] text-gray-400"
                               >
-                                <Briefcase className="w-3 h-3 text-gray-500 shrink-0" />
-                                <span className="truncate">{linkedProject.title}</span>
-                              </button>
-                            )}
+                                {tag}
+                              </span>
+                            ))}
                           </div>
-                        </div>
+                        )}
                       </div>
 
                       <button
                         type="button"
                         onClick={() => setEditingAction(action)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-[#C5A47E] hover:bg-[#1E1E1E] rounded-lg transition-all cursor-pointer shrink-0"
+                        className="opacity-0 group-hover:opacity-100 p-1 text-gray-500 hover:text-[#C5A47E] rounded transition-opacity cursor-pointer shrink-0"
                         title="Edit Action"
                       >
-                        <Edit3 className="w-3.5 h-3.5" />
+                        <Edit3 className="w-3 h-3" />
                       </button>
                     </div>
                   );

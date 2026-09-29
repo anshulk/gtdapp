@@ -209,8 +209,15 @@ export const normalizeActions = (rawActions: any[]): GTDAction[] => {
       if (act.timeEstimate && typeof act.timeEstimate === 'string') migrated.push(act.timeEstimate.trim());
       tags = migrated;
     }
+    const isRecurring = Boolean(act.isRecurring);
+    let recurrence = act.recurrence;
+    if (isRecurring && (!recurrence || !recurrence.period)) {
+      recurrence = { targetCount: 1, period: 'day', label: 'Daily' };
+    }
     return {
       ...act,
+      isRecurring,
+      recurrence,
       tags,
     };
   });
@@ -1887,7 +1894,7 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [projects, actions]);
 
   const nextActionsCount = useMemo(() => {
-    return actions.filter((act) => act.type === 'action' && !act.completed).length;
+    return actions.filter((act) => (act.type === 'action' || act.isRecurring) && (!act.completed || act.isRecurring)).length;
   }, [actions]);
 
   const inboxCount = useMemo(() => {

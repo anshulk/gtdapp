@@ -30,7 +30,7 @@ import { useGTD } from '../context/GTDContext';
 import { ActionType, GTDAction, RecurrencePeriod, GTDProject } from '../types/gtd';
 import { RecurringStreakBadge } from './RecurringStreakBadge';
 import { ActionEditModal } from './ActionEditModal';
-import { formatRecurrenceLabel } from '../utils/streakUtils';
+import { formatRecurrenceLabel, getActionStreakInfo } from '../utils/streakUtils';
 import { TagInput } from './TagInput';
 
 interface NextActionsViewProps {
@@ -256,6 +256,9 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
     const linkedProject = projects.find((p) => p.id === action.projectId);
     const hasNotes = Boolean(action.notes);
     const isNotesOpen = expandedNotes[action.id];
+    const streakInfo = action.isRecurring ? getActionStreakInfo(action) : null;
+    const isCompletedToday = Boolean(streakInfo?.completedToday);
+    const isActionDone = action.isRecurring ? isCompletedToday : Boolean(action.completed);
 
     return (
       <div
@@ -274,11 +277,19 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
               type="button"
               onClick={() => toggleActionComplete(action.id)}
               className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center transition-colors shrink-0 cursor-pointer ${
-                action.completed
+                isActionDone
                   ? 'bg-[#C5A47E] border-[#C5A47E] text-black'
                   : 'border-neutral-600 hover:border-[#C5A47E] text-transparent hover:text-[#C5A47E]'
               }`}
-              title={action.completed ? "Mark incomplete" : "Mark complete"}
+              title={
+                action.isRecurring
+                  ? isCompletedToday
+                    ? 'Completed today (click to undo)'
+                    : 'Mark complete today'
+                  : action.completed
+                  ? 'Mark incomplete'
+                  : 'Mark complete'
+              }
             >
               <Check className="w-3.5 h-3.5" />
             </button>
