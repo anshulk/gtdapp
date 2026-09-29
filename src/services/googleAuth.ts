@@ -19,7 +19,7 @@ export interface AuthErrorDetails extends Error {
 const STORAGE_KEY = 'gtd_google_auth_session';
 
 export const GOOGLE_CLIENT_ID = 
-  import.meta.env.VITE_GOOGLE_CLIENT_ID || 
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_CLIENT_ID) || 
   '429377356994-ojmcclt11tkrettk0a3msqjfg8tn048p.apps.googleusercontent.com';
 
 export const OAUTH_SCOPES = [

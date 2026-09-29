@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, Briefcase, Plus, Trash2, Link as LinkIcon, Target, ShieldCheck, CheckSquare, Tag } from 'lucide-react';
-import { GTDProject, ProjectStatus } from '../types/gtd';
+import { GTDProject, ProjectStatus, HorizonLevel } from '../types/gtd';
 import { useGTD } from '../context/GTDContext';
-import { LIFE_DOMAINS } from '../data/gtdData';
+import { getAncestorH4ForProject } from '../utils/domainHierarchy';
+import { HorizonMappingSelector } from './HorizonMappingSelector';
+import { HorizonItemModal } from './HorizonItemModal';
 
 interface ProjectModalProps {
   isOpen: boolean;
@@ -25,16 +27,25 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [desiredOutcome, setDesiredOutcome] = useState('');
   const [areaId, setAreaId] = useState('');
   const [goalId, setGoalId] = useState('');
-  const [lifeDomain, setLifeDomain] = useState('');
   const [status, setStatus] = useState<ProjectStatus>('active');
   const [priority, setPriority] = useState<GTDProject['priority']>('medium');
   const [targetDate, setTargetDate] = useState('');
   const [notes, setNotes] = useState('');
   const [initialNextAction, setInitialNextAction] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [horizonModalOpen, setHorizonModalOpen] = useState(false);
+  const [horizonModalLevel, setHorizonModalLevel] = useState<HorizonLevel>(3);
+  const [horizonModalParentId, setHorizonModalParentId] = useState<string | undefined>(undefined);
 
   const areasOfFocus = horizonItems.filter((h) => h.level === 2);
   const goals = horizonItems.filter((h) => h.level === 3);
+
+  // Derive ancestor H4 Vision and inherited domain dynamically
+  const ancestorH4 = useMemo(() => {
+    return getAncestorH4ForProject({ goalId, areaId } as GTDProject, horizonItems);
+  }, [goalId, areaId, horizonItems]);
+
+  const inheritedDomain = ancestorH4?.lifeDomain;
 
   useEffect(() => {
     setConfirmDelete(false);
@@ -43,7 +54,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       setDesiredOutcome(projectToEdit.desiredOutcome);
       setAreaId(projectToEdit.areaId || '');
       setGoalId(projectToEdit.goalId || '');
-      setLifeDomain(projectToEdit.lifeDomain || '');
       setStatus(projectToEdit.status);
       setPriority(projectToEdit.priority);
       setTargetDate(projectToEdit.targetDate || '');
@@ -54,9 +64,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       setDesiredOutcome('');
       setAreaId(defaultAreaId || '');
       setGoalId(defaultGoalId || '');
-      // If defaultAreaId provided, inherit its lifeDomain
-      const foundArea = areasOfFocus.find(a => a.id === defaultAreaId);
-      setLifeDomain(foundArea?.lifeDomain || '');
       setStatus('active');
       setPriority('medium');
       setTargetDate('');
@@ -73,25 +80,12 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       const selectedGoal = goals.find((g) => g.id === newGoalId);
       if (selectedGoal && selectedGoal.parentId) {
         setAreaId(selectedGoal.parentId);
-        const parentArea = areasOfFocus.find(a => a.id === selectedGoal.parentId);
-        if (parentArea?.lifeDomain && !lifeDomain) {
-          setLifeDomain(parentArea.lifeDomain);
-        }
-      }
-      if (selectedGoal?.lifeDomain && !lifeDomain) {
-        setLifeDomain(selectedGoal.lifeDomain);
       }
     }
   };
 
   const handleAreaChange = (newAreaId: string) => {
     setAreaId(newAreaId);
-    if (newAreaId) {
-      const foundArea = areasOfFocus.find(a => a.id === newAreaId);
-      if (foundArea?.lifeDomain) {
-        setLifeDomain(foundArea.lifeDomain);
-      }
-    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -104,7 +98,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         desiredOutcome: desiredOutcome.trim(),
         areaId: areaId || undefined,
         goalId: goalId || undefined,
-        lifeDomain: lifeDomain || undefined,
+        lifeDomain: undefined,
         status,
         priority,
         targetDate: targetDate || undefined,
@@ -117,7 +111,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           desiredOutcome: desiredOutcome.trim(),
           areaId: areaId || undefined,
           goalId: goalId || undefined,
-          lifeDomain: lifeDomain || undefined,
+          lifeDomain: undefined,
           status,
           priority,
           targetDate: targetDate || undefined,
@@ -210,74 +204,55 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             </div>
           )}
 
-          {/* Horizon Links: Area of Focus & Goal */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Horizon 2 (Area of Focus)</span>
-              </label>
-              <select
-                value={areaId}
-                onChange={(e) => handleAreaChange(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-[#191919] border border-[#262626] rounded-xl focus:outline-hidden focus:border-[#C5A47E] text-gray-200"
-              >
-                <option value="">No Area of Focus</option>
-                {areasOfFocus.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.title}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Horizon Links: H3 / H2 Mapping Selector */}
+          <HorizonMappingSelector
+            selectedGoalId={goalId}
+            selectedAreaId={areaId}
+            projectTitle={title}
+            onGoalChange={(newGoalId, autoAreaId) => {
+              setGoalId(newGoalId);
+              if (autoAreaId) {
+                setAreaId(autoAreaId);
+              }
+            }}
+            onAreaChange={(newAreaId) => {
+              setAreaId(newAreaId);
+            }}
+            onOpenCreateHorizon={(level, parentId) => {
+              setHorizonModalLevel(level);
+              setHorizonModalParentId(parentId);
+              setHorizonModalOpen(true);
+            }}
+          />
 
-            <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                <Target className="w-3.5 h-3.5 text-blue-400" />
-                <span>Horizon 3 (1-2y Goal)</span>
-              </label>
-              <select
-                value={goalId}
-                onChange={(e) => handleGoalChange(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-[#191919] border border-[#262626] rounded-xl focus:outline-hidden focus:border-[#C5A47E] text-gray-200"
-              >
-                <option value="">No higher Goal linked</option>
-                {goals.map((g) => {
-                  const parentArea = areasOfFocus.find((a) => a.id === g.parentId);
-                  return (
-                    <option key={g.id} value={g.id}>
-                      {g.title} {parentArea ? `[${parentArea.title}]` : ''}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-          </div>
-
-          {/* Life Domain */}
-          <div>
-            <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-              <Tag className="w-3.5 h-3.5 text-[#C5A47E]" />
-              <span>Life Domain</span>
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {LIFE_DOMAINS.map((domain) => {
-                const isSelected = lifeDomain === domain;
-                return (
-                  <button
-                    key={domain}
-                    type="button"
-                    onClick={() => setLifeDomain(isSelected ? '' : domain)}
-                    className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#C5A47E]/20 text-[#C5A47E] border-[#C5A47E]/60'
-                        : 'bg-[#191919] text-gray-400 border-[#262626] hover:bg-[#202020] hover:text-gray-200'
-                    }`}
-                  >
-                    {domain}
-                  </button>
-                );
-              })}
+          {/* Inherited Life Domain Display (H4 Authority) */}
+          <div className="bg-[#191919] border border-[#262626] rounded-xl p-3 sm:p-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-[#C5A47E]" />
+                  <span>Inherited Life Domain</span>
+                </div>
+                <p className="text-[11px] text-gray-400">
+                  {inheritedDomain ? (
+                    <>
+                      Inherited from H4 Vision:{' '}
+                      <strong className="text-white font-medium">{ancestorH4?.title}</strong>
+                    </>
+                  ) : (
+                    'Link to a Goal (H3) or Area (H2) anchored to an H4 Vision to inherit its Life Domain.'
+                  )}
+                </p>
+              </div>
+              {inheritedDomain ? (
+                <span className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-[#C5A47E]/20 text-[#C5A47E] border border-[#C5A47E]/40 whitespace-nowrap">
+                  {inheritedDomain}
+                </span>
+              ) : (
+                <span className="text-[11px] text-amber-400/90 font-mono bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40 whitespace-nowrap">
+                  Domain Pending
+                </span>
+              )}
             </div>
           </div>
 
@@ -397,8 +372,16 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
           </div>
 
         </form>
-
       </div>
+
+      {horizonModalOpen && (
+        <HorizonItemModal
+          isOpen={horizonModalOpen}
+          onClose={() => setHorizonModalOpen(false)}
+          defaultLevel={horizonModalLevel}
+          defaultParentId={horizonModalParentId}
+        />
+      )}
     </div>
   );
 };

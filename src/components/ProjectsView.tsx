@@ -21,16 +21,34 @@ import {
   RotateCcw,
   Flame,
   X,
-  Tag
+  Tag,
+  ChevronDown,
+  FolderTree,
+  LayoutGrid
 } from 'lucide-react';
 import { useGTD } from '../context/GTDContext';
 import { GTDProject, ProjectStatus, GTDAction } from '../types/gtd';
 import { LIFE_DOMAINS } from '../data/gtdData';
+import { getProjectInheritedDomain, getHorizonItemDomain } from '../utils/domainHierarchy';
 import { ProjectModal } from './ProjectModal';
 import { ProjectDetailModal } from './ProjectDetailModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { ActionEditModal } from './ActionEditModal';
+import { ProjectCard } from './ProjectCard';
 import { isProjectStalled } from '../utils/projectUtils';
+
+interface ProjectParentGroup {
+  id: string;
+  type: 'goal' | 'area' | 'unassigned';
+  level: 3 | 2 | 0;
+  title: string;
+  description?: string;
+  parentAreaTitle?: string;
+  lifeDomain?: string;
+  areaId?: string;
+  goalId?: string;
+  projects: GTDProject[];
+}
 
 export const ProjectsView: React.FC = () => {
   const {
@@ -56,10 +74,13 @@ export const ProjectsView: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [projectToEdit, setProjectToEdit] = useState<GTDProject | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<GTDProject | null>(null);
-  const [quickConfirmId, setQuickConfirmId] = useState<string | null>(null);
-  const [inlineNextAction, setInlineNextAction] = useState<{ [projId: string]: string }>({});
-  const [addingActionForProj, setAddingActionForProj] = useState<{ [projId: string]: boolean }>({});
   const [editingAction, setEditingAction] = useState<GTDAction | null>(null);
+
+  // Grouping by parent state
+  const [groupByParent, setGroupByParent] = useState<boolean>(true);
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<string>>(new Set());
+  const [defaultParentAreaId, setDefaultParentAreaId] = useState<string | undefined>(undefined);
+  const [defaultParentGoalId, setDefaultParentGoalId] = useState<string | undefined>(undefined);
 
   // Undo Toast state
   const [undoToast, setUndoToast] = useState<{
@@ -91,7 +112,6 @@ export const ProjectsView: React.FC = () => {
     if (selectedProjectId === project.id) {
       setSelectedProjectId(null);
     }
-    setQuickConfirmId(null);
     setProjectToDelete(null);
 
     // Trigger Undo Toast
@@ -118,7 +138,7 @@ export const ProjectsView: React.FC = () => {
       if (areaFilter !== 'all' && p.areaId !== areaFilter) return false;
       if (goalFilter !== 'all' && p.goalId !== goalFilter) return false;
       if (domainFilter !== 'all') {
-        const itemDomain = p.lifeDomain || horizonItems.find((h) => h.id === p.areaId)?.lifeDomain || horizonItems.find((h) => h.id === p.goalId)?.lifeDomain;
+        const itemDomain = getProjectInheritedDomain(p, horizonItems);
         if (itemDomain !== domainFilter) return false;
       }
       if (search.trim()) {
@@ -131,9 +151,99 @@ export const ProjectsView: React.FC = () => {
     });
   }, [projects, statusFilter, areaFilter, goalFilter, domainFilter, horizonItems, search]);
 
-  const handleOpenAddModal = () => {
+  const handleOpenAddModal = (defaultAreaId?: string, defaultGoalId?: string) => {
     setProjectToEdit(null);
+    setDefaultParentAreaId(defaultAreaId);
+    setDefaultParentGoalId(defaultGoalId);
     setModalOpen(true);
+  };
+
+  const projectGroups = useMemo(() => {
+    const groupsMap = new Map<string, ProjectParentGroup>();
+
+    filteredProjects.forEach((p) => {
+      const linkedGoal = p.goalId ? goals.find((g) => g.id === p.goalId) : undefined;
+      const linkedArea = p.areaId ? areasOfFocus.find((a) => a.id === p.areaId) : undefined;
+
+      let groupId = 'unassigned';
+      let type: 'goal' | 'area' | 'unassigned' = 'unassigned';
+      let level: 3 | 2 | 0 = 0;
+      let title = 'Independent Projects';
+      let description: string | undefined = 'Projects with no higher horizon goal or area assigned';
+      let parentAreaTitle: string | undefined = undefined;
+      let lifeDomain: string | undefined = getProjectInheritedDomain(p, horizonItems);
+      let areaId: string | undefined = undefined;
+      let goalId: string | undefined = undefined;
+
+      if (linkedGoal) {
+        groupId = `goal-${linkedGoal.id}`;
+        type = 'goal';
+        level = 3;
+        title = linkedGoal.title;
+        description = linkedGoal.description;
+        goalId = linkedGoal.id;
+        areaId = p.areaId || linkedGoal.parentId;
+        lifeDomain = getHorizonItemDomain(linkedGoal, horizonItems) || getProjectInheritedDomain(p, horizonItems);
+
+        const goalParentArea = linkedArea || (linkedGoal.parentId ? areasOfFocus.find((a) => a.id === linkedGoal.parentId) : undefined);
+        if (goalParentArea) {
+          parentAreaTitle = goalParentArea.title;
+        }
+      } else if (linkedArea) {
+        groupId = `area-${linkedArea.id}`;
+        type = 'area';
+        level = 2;
+        title = linkedArea.title;
+        description = linkedArea.description;
+        areaId = linkedArea.id;
+        lifeDomain = getHorizonItemDomain(linkedArea, horizonItems) || getProjectInheritedDomain(p, horizonItems);
+      }
+
+      if (!groupsMap.has(groupId)) {
+        groupsMap.set(groupId, {
+          id: groupId,
+          type,
+          level,
+          title,
+          description,
+          parentAreaTitle,
+          lifeDomain,
+          areaId,
+          goalId,
+          projects: [],
+        });
+      }
+
+      groupsMap.get(groupId)!.projects.push(p);
+    });
+
+    // Sort groups: Level 3 (Goals) first, then Level 2 (Areas), then Level 0 (Unassigned)
+    return Array.from(groupsMap.values()).sort((a, b) => {
+      if (a.level !== b.level) {
+        return b.level - a.level;
+      }
+      return a.title.localeCompare(b.title);
+    });
+  }, [filteredProjects, goals, areasOfFocus]);
+
+  const toggleGroupCollapse = (groupId: string) => {
+    setCollapsedGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  };
+
+  const expandAllGroups = () => {
+    setCollapsedGroupIds(new Set());
+  };
+
+  const collapseAllGroups = () => {
+    setCollapsedGroupIds(new Set(projectGroups.map((g) => g.id)));
   };
 
   const handleOpenEditModal = (proj: GTDProject, e: React.MouseEvent) => {
@@ -142,71 +252,50 @@ export const ProjectsView: React.FC = () => {
     setModalOpen(true);
   };
 
-  const handleAddInlineAction = (projId: string, e: React.FormEvent) => {
-    e.preventDefault();
-    const text = inlineNextAction[projId]?.trim();
-    if (!text) return;
-
-    addAction({
-      title: text,
-      projectId: projId,
-      context: '@computer',
-      energy: 'medium',
-      timeEstimate: '15-30m',
-      type: 'action',
-      priority: 'high',
-    });
-
-    setInlineNextAction((prev) => ({ ...prev, [projId]: '' }));
-  };
-
   return (
     <div className="space-y-8 pb-16">
       
       {/* Top Banner */}
-      <div className="bg-[#141414] rounded-2xl border border-[#262626] p-6 sm:p-8 shadow-md">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#C5A47E]/10 text-[#C5A47E] text-xs font-bold border border-[#C5A47E]/20">
-              <Briefcase className="w-3.5 h-3.5" />
-              <span>Horizon 1 • 10,000 ft</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white font-serif">
-              Projects Matrix & Deliverables
+      <div className="bg-[#141414] rounded-xl border border-[#262626] p-3.5 sm:p-4 shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-base sm:text-lg font-bold tracking-tight text-white font-serif flex items-center gap-2">
+              <Briefcase className="w-4 h-4 text-[#C5A47E]" />
+              <span>Projects Matrix</span>
             </h1>
-            <p className="text-gray-400 text-sm max-w-2xl leading-relaxed">
-              In GTD, a project is any desired outcome requiring more than one action step to complete within 12 months. Every active project must have a clear physical next action.
-            </p>
+            <span className="text-[11px] font-mono text-[#C5A47E] px-2 py-0.5 rounded-md bg-[#C5A47E]/10 border border-[#C5A47E]/20">
+              H1 • 10,000 ft
+            </span>
           </div>
 
           <button
             onClick={handleOpenAddModal}
-            className="px-4 py-2.5 bg-[#C5A47E] hover:bg-[#b8946e] active:bg-[#a8845e] text-black text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+            className="px-3 py-1.5 bg-[#C5A47E] hover:bg-[#b8946e] active:bg-[#a8845e] text-black text-xs font-bold rounded-lg shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
           >
-            <Plus className="w-4 h-4" />
-            <span>Create New Project</span>
+            <Plus className="w-3.5 h-3.5" />
+            <span>Create Project</span>
           </button>
         </div>
 
         {/* Filter Controls Bar */}
-        <div className="mt-8 pt-6 border-t border-[#262626] flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="mt-3 pt-3 border-t border-[#202020] flex flex-col md:flex-row md:items-center justify-between gap-3">
           
           {/* Status Tabs */}
-          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-1 text-xs">
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0.5 text-xs">
             {(['active', 'on-hold', 'completed', 'someday-maybe', 'all'] as const).map((st) => {
               const count = st === 'all' ? projects.length : projects.filter((p) => p.status === st).length;
               return (
                 <button
                   key={st}
                   onClick={() => setStatusFilter(st)}
-                  className={`px-3 py-1.5 rounded-xl font-bold transition-all capitalize whitespace-nowrap cursor-pointer ${
+                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all capitalize whitespace-nowrap cursor-pointer ${
                     statusFilter === st
                       ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
                       : 'bg-[#1E1E1E] text-gray-400 hover:bg-[#282828] hover:text-gray-200 border border-[#262626]'
                   }`}
                 >
                   <span>{st.replace('-', ' ')}</span>
-                  <span className={`ml-1.5 text-[10px] px-1.5 py-0.2 rounded-full ${
+                  <span className={`ml-1 text-[10px] px-1.5 py-0.2 rounded-full ${
                     statusFilter === st ? 'bg-black/30 text-black' : 'bg-[#282828] text-gray-400'
                   }`}>
                     {count}
@@ -261,397 +350,270 @@ export const ProjectsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Projects Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredProjects.length === 0 ? (
-          <div className="col-span-full bg-[#141414] rounded-2xl border border-dashed border-[#262626] p-12 text-center">
-            <Briefcase className="w-12 h-12 text-[#C5A47E] mx-auto mb-3 opacity-80" />
-            <h3 className="text-base font-bold text-white font-serif">
-              No Projects Found
-            </h3>
-            <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
-              No projects match the selected filters. Create a new multi-step project to get moving!
-            </p>
+      {/* Layout & Grouping Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs bg-[#121212] border border-[#222222] p-2.5 sm:px-3 sm:py-2 rounded-xl">
+        {/* Layout Mode Toggle */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-gray-400 font-medium">Layout:</span>
+          <div className="bg-[#181818] border border-[#282828] p-0.5 rounded-lg flex items-center gap-1">
             <button
-              onClick={handleOpenAddModal}
-              className="mt-4 px-4 py-2 bg-[#C5A47E] text-black font-bold rounded-xl text-xs shadow-xs hover:bg-[#b8946e] cursor-pointer"
+              type="button"
+              onClick={() => setGroupByParent(true)}
+              className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
+                groupByParent
+                  ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
             >
-              Create Project
+              <FolderTree className="w-3.5 h-3.5" />
+              <span>Group by Parent</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setGroupByParent(false)}
+              className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
+                !groupByParent
+                  ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Flat Grid</span>
             </button>
           </div>
-        ) : (
-          filteredProjects.map((project) => {
-            const projectActions = actions.filter((a) => a.projectId === project.id);
-            const activeActions = projectActions.filter((a) => !a.isRecurring && !a.completed && a.type === 'action');
-            const recurringActions = projectActions.filter((a) => a.isRecurring && a.type === 'action');
-            const completedActions = projectActions.filter((a) => a.completed);
-            const isStalled = isProjectStalled(project, projectActions);
 
-            const linkedArea = horizonItems.find((h) => h.id === project.areaId);
-            const linkedGoal = horizonItems.find((h) => h.id === project.goalId);
+          {groupByParent && (
+            <span className="text-[11px] text-[#C5A47E] font-mono px-2 py-0.5 rounded bg-[#C5A47E]/10 border border-[#C5A47E]/20">
+              {projectGroups.length} Parent {projectGroups.length === 1 ? 'Group' : 'Groups'}
+            </span>
+          )}
+        </div>
+
+        {/* Expand / Collapse all & Search */}
+        <div className="flex items-center gap-2.5 self-start sm:self-auto flex-wrap">
+          {groupByParent && projectGroups.length > 1 && (
+            <div className="flex items-center gap-1 text-[11px] text-gray-400">
+              <button
+                type="button"
+                onClick={expandAllGroups}
+                className="hover:text-white px-2 py-1 rounded bg-[#181818] border border-[#262626] hover:border-[#383838] transition-colors cursor-pointer"
+              >
+                Expand All
+              </button>
+              <button
+                type="button"
+                onClick={collapseAllGroups}
+                className="hover:text-white px-2 py-1 rounded bg-[#181818] border border-[#262626] hover:border-[#383838] transition-colors cursor-pointer"
+              >
+                Collapse All
+              </button>
+            </div>
+          )}
+
+          {/* Search Box */}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search projects..."
+              className="w-36 sm:w-48 pl-8 pr-6 py-1 bg-[#161616] border border-[#282828] rounded-lg text-gray-300 text-xs focus:outline-hidden focus:border-[#C5A47E] placeholder-gray-500"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Projects Display */}
+      {filteredProjects.length === 0 ? (
+        <div className="bg-[#141414] rounded-2xl border border-dashed border-[#262626] p-12 text-center">
+          <Briefcase className="w-12 h-12 text-[#C5A47E] mx-auto mb-3 opacity-80" />
+          <h3 className="text-base font-bold text-white font-serif">
+            No Projects Found
+          </h3>
+          <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
+            No projects match the selected filters. Create a new multi-step project to get moving!
+          </p>
+          <button
+            onClick={() => handleOpenAddModal()}
+            className="mt-4 px-4 py-2 bg-[#C5A47E] text-black font-bold rounded-xl text-xs shadow-xs hover:bg-[#b8946e] cursor-pointer"
+          >
+            Create Project
+          </button>
+        </div>
+      ) : groupByParent ? (
+        <div className="space-y-6">
+          {projectGroups.map((group) => {
+            const isCollapsed = collapsedGroupIds.has(group.id);
+            const stalledCount = group.projects.filter((p) =>
+              isProjectStalled(p, actions.filter((a) => a.projectId === p.id))
+            ).length;
 
             return (
               <div
-                key={project.id}
-                onClick={() => setSelectedProjectId(project.id)}
-                className={`bg-[#141414] rounded-2xl border transition-all p-5 flex flex-col justify-between cursor-pointer group shadow-md hover:shadow-xl ${
-                  isStalled
-                    ? 'border-amber-700/80 ring-1 ring-amber-800/40'
-                    : 'border-[#262626] hover:border-[#383838]'
-                }`}
+                key={group.id}
+                className="bg-[#121212] border border-[#242424] rounded-2xl overflow-hidden shadow-sm transition-all"
               >
-                <div className="space-y-3.5">
-                  
-                  {/* Top Badges */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
-                        project.status === 'active'
-                          ? 'bg-[#C5A47E]/10 text-[#C5A47E] border border-[#C5A47E]/30'
-                          : project.status === 'completed'
-                          ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/40'
-                          : 'bg-neutral-800 text-gray-400 border border-[#262626]'
-                      }`}>
-                        {project.status}
-                      </span>
+                {/* Group Header */}
+                <div
+                  onClick={() => toggleGroupCollapse(group.id)}
+                  className="p-3.5 sm:p-4 bg-[#161616] hover:bg-[#191919] border-b border-[#222222] flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer transition-colors select-none"
+                >
+                  <div className="flex items-start sm:items-center gap-3 min-w-0">
+                    <button
+                      type="button"
+                      className="p-1 text-gray-400 hover:text-white rounded-md transition-colors shrink-0 mt-0.5 sm:mt-0"
+                      title={isCollapsed ? 'Expand group' : 'Collapse group'}
+                    >
+                      <ChevronDown
+                        className={`w-4 h-4 transition-transform duration-200 ${
+                          isCollapsed ? '-rotate-90 text-gray-500' : 'text-[#C5A47E]'
+                        }`}
+                      />
+                    </button>
 
-                      <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                        project.priority === 'high'
-                          ? 'bg-rose-950/60 text-rose-300 border border-rose-800/40'
-                          : project.priority === 'medium'
-                          ? 'bg-amber-950/60 text-amber-300 border border-amber-800/40'
-                          : 'bg-neutral-800 text-gray-400'
-                      }`}>
-                        {project.priority}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      {quickConfirmId === project.id ? (
-                        <div
-                          onClick={(e) => e.stopPropagation()}
-                          className="flex items-center gap-1 bg-rose-950/80 border border-rose-800/80 px-2 py-0.5 rounded-lg text-xs animate-in fade-in"
-                        >
-                          <span className="text-[11px] text-rose-200 font-semibold">Delete?</span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              executeDeleteProject(project);
-                            }}
-                            className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold rounded cursor-pointer transition-colors"
-                          >
-                            Yes
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setQuickConfirmId(null);
-                            }}
-                            className="px-1.5 py-0.5 text-gray-400 hover:text-white text-[10px] rounded cursor-pointer transition-colors"
-                          >
-                            No
-                          </button>
+                    {/* Altitude / Parent Icon */}
+                    <div className="shrink-0">
+                      {group.type === 'goal' ? (
+                        <div className="p-2 rounded-xl bg-sky-950/60 text-sky-400 border border-sky-800/50">
+                          <Target className="w-4 h-4" />
+                        </div>
+                      ) : group.type === 'area' ? (
+                        <div className="p-2 rounded-xl bg-emerald-950/60 text-emerald-400 border border-emerald-800/50">
+                          <ShieldCheck className="w-4 h-4" />
                         </div>
                       ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={(e) => handleOpenEditModal(project, e)}
-                            className="p-1.5 text-gray-500 hover:text-[#C5A47E] hover:bg-[#1E1E1E] rounded-lg cursor-pointer transition-colors"
-                            title="Edit project"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (e.shiftKey) {
-                                executeDeleteProject(project);
-                              } else {
-                                setQuickConfirmId(project.id);
-                              }
-                            }}
-                            className="p-1.5 text-gray-500 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg cursor-pointer transition-colors group/del"
-                            title="Quick Delete (Click to confirm, or Shift+Click for instant delete)"
-                          >
-                            <Trash2 className="w-3.5 h-3.5 group-hover/del:scale-110 transition-transform" />
-                          </button>
-                        </>
+                        <div className="p-2 rounded-xl bg-neutral-800 text-gray-400 border border-neutral-700">
+                          <Briefcase className="w-4 h-4" />
+                        </div>
                       )}
                     </div>
-                  </div>
 
-                  {/* Project Title */}
-                  <h3 className="text-base font-bold text-white font-serif leading-snug group-hover:text-[#C5A47E] transition-colors">
-                    {project.title}
-                  </h3>
-
-                  {/* Desired Outcome */}
-                  <div className="text-xs text-gray-300 bg-[#191919] p-2.5 rounded-xl border border-[#262626] space-y-0.5">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
-                      Outcome / Finish Line:
-                    </span>
-                    <p className="line-clamp-2 leading-relaxed font-medium text-gray-200">
-                      {project.desiredOutcome}
-                    </p>
-                  </div>
-
-                  {/* Horizon Lineage Tags & Life Domain */}
-                  <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                    {project.lifeDomain && (
-                      <span className="px-2 py-0.5 rounded bg-[#C5A47E]/15 text-[#C5A47E] border border-[#C5A47E]/30 font-medium flex items-center gap-1">
-                        <Tag className="w-2.5 h-2.5" />
-                        <span>{project.lifeDomain}</span>
-                      </span>
-                    )}
-                    {linkedArea && (
-                      <span className="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 font-medium flex items-center gap-1">
-                        <ShieldCheck className="w-3 h-3" />
-                        <span className="truncate max-w-[120px]">{linkedArea.title}</span>
-                      </span>
-                    )}
-                    {linkedGoal && (
-                      <span className="px-2 py-0.5 rounded bg-sky-950/60 text-sky-300 border border-sky-800/40 font-medium flex items-center gap-1">
-                        <Target className="w-3 h-3" />
-                        <span className="truncate max-w-[120px]">{linkedGoal.title}</span>
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Stalled Alert & Inline Action Adder */}
-                  {isStalled ? (
-                    <div
-                      onClick={(e) => e.stopPropagation()}
-                      className="bg-amber-950/30 p-2.5 sm:p-3 rounded-xl border border-amber-800/60 space-y-2 text-xs"
-                    >
-                      <div className="flex items-center gap-1.5 text-amber-300 font-bold text-[11px]">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <span>Stalled: Missing Next Action</span>
-                      </div>
-                      <form onSubmit={(e) => handleAddInlineAction(project.id, e)} className="flex items-center gap-1.5 w-full">
-                        <input
-                          type="text"
-                          value={inlineNextAction[project.id] || ''}
-                          onChange={(e) =>
-                            setInlineNextAction((prev) => ({ ...prev, [project.id]: e.target.value }))
-                          }
-                          placeholder="Type next physical step..."
-                          className="flex-1 min-w-0 px-2.5 py-1 text-xs bg-[#141414] border border-amber-700/60 text-gray-200 placeholder-gray-500 rounded-md focus:outline-hidden focus:border-amber-400"
-                        />
-                        <button
-                          type="submit"
-                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-black rounded-md text-[11px] font-bold shrink-0 whitespace-nowrap cursor-pointer transition-colors"
-                        >
-                          Add
-                        </button>
-                      </form>
-                    </div>
-                  ) : (
-                    /* Active next action or recurring routine preview with interactive completion checkboxes */
-                    (activeActions.length > 0 || recurringActions.length > 0) && (
-                      <div 
-                        onClick={(e) => e.stopPropagation()}
-                        className="space-y-1.5 text-xs"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                            Active Actions ({activeActions.length + recurringActions.length})
+                    {/* Title & Lineage */}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {group.type === 'goal' && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-sky-950/70 text-sky-300 border border-sky-800/50 font-mono">
+                            H3 • 30k ft Goal
                           </span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setAddingActionForProj((prev) => ({ ...prev, [project.id]: !prev[project.id] }))
-                            }
-                            className="text-[10px] text-gray-400 hover:text-[#C5A47E] flex items-center gap-0.5 cursor-pointer transition-colors"
-                            title="Add another action to this project"
-                          >
-                            <Plus className="w-3 h-3" />
-                            <span>Action</span>
-                          </button>
-                        </div>
-
-                        {/* Inline add action form when toggled */}
-                        {addingActionForProj[project.id] && (
-                          <form 
-                            onSubmit={(e) => {
-                              handleAddInlineAction(project.id, e);
-                              setAddingActionForProj((prev) => ({ ...prev, [project.id]: false }));
-                            }} 
-                            className="flex items-center gap-1.5 w-full pb-1"
-                          >
-                            <input
-                              type="text"
-                              autoFocus
-                              value={inlineNextAction[project.id] || ''}
-                              onChange={(e) =>
-                                setInlineNextAction((prev) => ({ ...prev, [project.id]: e.target.value }))
-                              }
-                              placeholder="Add next physical step..."
-                              className="flex-1 min-w-0 px-2.5 py-1 text-xs bg-[#191919] border border-[#383838] text-gray-200 placeholder-gray-500 rounded-md focus:outline-hidden focus:border-[#C5A47E]"
-                            />
-                            <button
-                              type="submit"
-                              className="px-2.5 py-1 bg-[#C5A47E] hover:bg-[#b8946e] text-black rounded-md text-[11px] font-bold shrink-0 whitespace-nowrap cursor-pointer transition-colors"
-                            >
-                              Add
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setAddingActionForProj((prev) => ({ ...prev, [project.id]: false }))}
-                              className="p-1 text-gray-500 hover:text-gray-300 rounded cursor-pointer"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </form>
+                        )}
+                        {group.type === 'area' && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-950/70 text-emerald-300 border border-emerald-800/50 font-mono">
+                            H2 • 20k ft Area
+                          </span>
+                        )}
+                        {group.type === 'unassigned' && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-neutral-800 text-gray-400 border border-neutral-700 font-mono">
+                            Independent / Standalone
+                          </span>
                         )}
 
-                        {/* Actions List */}
-                        <div className="space-y-1.5">
-                          {activeActions.slice(0, 2).map((act) => (
-                            <div
-                              key={act.id}
-                              className="flex items-center justify-between gap-2 text-gray-200 bg-[#191919] hover:bg-[#202020] p-2 rounded-lg border border-[#262626] hover:border-[#C5A47E]/40 transition-colors group/action"
-                            >
-                              <div className="flex items-center gap-2 min-w-0 flex-1">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleActionComplete(act.id);
-                                  }}
-                                  className="w-4 h-4 rounded border border-neutral-600 hover:border-[#C5A47E] hover:bg-[#C5A47E]/15 flex items-center justify-center text-transparent hover:text-[#C5A47E] transition-all shrink-0 cursor-pointer group/chk"
-                                  title="Mark action complete"
-                                >
-                                  <Check className="w-2.5 h-2.5 group-hover/chk:scale-110 transition-transform" />
-                                </button>
-                                <span 
-                                  onClick={() => setEditingAction(act)}
-                                  className="truncate font-medium cursor-pointer hover:text-[#C5A47E] transition-colors"
-                                  title={act.title}
-                                >
-                                  {act.title}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <span className="font-mono text-[9px] px-1 py-0.2 rounded bg-[#141414] text-gray-400 border border-[#242424]">
-                                  {act.context}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingAction(act)}
-                                  className="opacity-0 group-hover/action:opacity-100 p-0.5 text-gray-500 hover:text-[#C5A47E] rounded transition-opacity cursor-pointer"
-                                  title="Edit action"
-                                >
-                                  <Edit3 className="w-3 h-3" />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-
-                          {/* Active Recurring Routines */}
-                          {recurringActions.slice(0, Math.max(1, 3 - activeActions.length)).map((act) => (
-                            <div
-                              key={act.id}
-                              className="flex items-center justify-between gap-2 text-gray-200 bg-[#191919] hover:bg-[#202020] p-2 rounded-lg border border-amber-900/30 hover:border-amber-700/40 transition-colors group/action"
-                            >
-                              <div className="flex items-center gap-2 min-w-0 flex-1">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    logRecurringCompletion(act.id);
-                                  }}
-                                  className="w-4 h-4 rounded border border-amber-800/60 hover:border-amber-400 hover:bg-amber-400/15 flex items-center justify-center text-amber-500/70 hover:text-amber-300 transition-all shrink-0 cursor-pointer group/chk"
-                                  title="Log routine completion for today"
-                                >
-                                  <RotateCcw className="w-2.5 h-2.5 group-hover/chk:rotate-180 transition-transform duration-300" />
-                                </button>
-                                <span 
-                                  onClick={() => setEditingAction(act)}
-                                  className="truncate font-medium text-amber-200 cursor-pointer hover:text-amber-100 transition-colors"
-                                  title={act.title}
-                                >
-                                  {act.title}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                {act.recurrence?.label && (
-                                  <span className="text-[9px] text-gray-400">
-                                    {act.recurrence.label}
-                                  </span>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingAction(act)}
-                                  className="opacity-0 group-hover/action:opacity-100 p-0.5 text-gray-500 hover:text-[#C5A47E] rounded transition-opacity cursor-pointer"
-                                  title="Edit routine"
-                                >
-                                  <Edit3 className="w-3 h-3" />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-
-                          {/* More actions link if count exceeds displayed */}
-                          {activeActions.length + recurringActions.length > 2 && (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedProjectId(project.id)}
-                              className="text-[10px] text-gray-500 hover:text-[#C5A47E] pt-0.5 block w-full text-right cursor-pointer transition-colors"
-                            >
-                              +{Math.max(0, activeActions.length + recurringActions.length - 2)} more actions • View details →
-                            </button>
-                          )}
-                        </div>
+                        <h2 className="text-sm sm:text-base font-bold text-white font-serif truncate">
+                          {group.title}
+                        </h2>
                       </div>
-                    )
-                  )}
 
-                </div>
+                      {/* Sub-lineage and domain */}
+                      <div className="flex items-center gap-2.5 text-[11px] text-gray-400 mt-0.5 flex-wrap">
+                        {group.parentAreaTitle && (
+                          <span className="flex items-center gap-1 text-emerald-400/90 font-medium">
+                            <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                            <span>Area: {group.parentAreaTitle}</span>
+                          </span>
+                        )}
+                        {group.lifeDomain && (
+                          <span className="flex items-center gap-1 text-[#C5A47E]/90">
+                            <Tag className="w-2.5 h-2.5 text-[#C5A47E]" />
+                            <span>{group.lifeDomain}</span>
+                          </span>
+                        )}
+                        {group.description && (
+                          <span className="text-gray-500 hidden md:inline truncate max-w-xs">
+                            • {group.description}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
-                {/* Card Footer: Progress Bar */}
-                <div className="mt-5 pt-3 border-t border-[#262626] space-y-2">
-                  <div className="flex items-center justify-between text-[11px] text-gray-400 font-medium">
-                    <span>
-                      {completedActions.length} of {projectActions.length} Actions Done
-                    </span>
-                    {project.targetDate && (
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3 text-[#C5A47E]" />
-                        <span>{project.targetDate}</span>
+                  {/* Right stats & action button */}
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-2 self-end sm:self-auto shrink-0 text-xs"
+                  >
+                    {stalledCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/40 text-[10px] font-bold flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3 text-amber-400" />
+                        <span>{stalledCount} Stalled</span>
                       </span>
                     )}
-                  </div>
 
-                  {/* Progress bar line */}
-                  <div className="w-full bg-[#1E1E1E] h-1.5 rounded-full overflow-hidden">
-                    <div
-                      className="bg-[#C5A47E] h-full transition-all duration-300"
-                      style={{
-                        width: `${
-                          projectActions.length === 0
-                            ? 0
-                            : (completedActions.length / projectActions.length) * 100
-                        }%`,
-                      }}
-                    />
+                    <span className="px-2 py-0.5 rounded-full bg-[#1F1F1F] text-gray-300 border border-[#2E2E2E] text-[11px] font-medium font-mono">
+                      {group.projects.length} {group.projects.length === 1 ? 'project' : 'projects'}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAddModal(group.areaId, group.goalId)}
+                      className="px-2.5 py-1 bg-[#C5A47E]/15 hover:bg-[#C5A47E] text-[#C5A47E] hover:text-black border border-[#C5A47E]/30 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer"
+                      title={`Add project under ${group.title}`}
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add Project</span>
+                    </button>
                   </div>
                 </div>
 
+                {/* Group Project Cards */}
+                {!isCollapsed && (
+                  <div className="p-4 sm:p-5 bg-[#101010]/50">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {group.projects.map((project) => (
+                        <ProjectCard
+                          key={project.id}
+                          project={project}
+                          onEditProject={handleOpenEditModal}
+                          onDeleteProject={executeDeleteProject}
+                          onEditAction={(act) => setEditingAction(act)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredProjects.map((project) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              onEditProject={handleOpenEditModal}
+              onDeleteProject={executeDeleteProject}
+              onEditAction={(act) => setEditingAction(act)}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Project Modal (Add/Edit) */}
       <ProjectModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         projectToEdit={projectToEdit}
+        defaultAreaId={defaultParentAreaId}
+        defaultGoalId={defaultParentGoalId}
       />
 
       {/* Project Deep Dive Drawer Modal */}

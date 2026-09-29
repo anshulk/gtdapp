@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, Compass, Plus, Trash2, ShieldCheck, Target, Eye, Layers, Tag } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { X, Compass, Plus, Trash2, ShieldCheck, Target, Eye, Layers, Tag, Star } from 'lucide-react';
 import { HorizonItem, HorizonLevel } from '../types/gtd';
 import { useGTD } from '../context/GTDContext';
 import { HORIZON_DEFINITIONS, LIFE_DOMAINS } from '../data/gtdData';
@@ -28,11 +28,32 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
   const [parentId, setParentId] = useState<string>('');
   const [targetDate, setTargetDate] = useState('');
   const [keyResults, setKeyResults] = useState<string[]>(['']);
+  const [progressRating, setProgressRating] = useState<number | undefined>(undefined);
+  const [reviewNotes, setReviewNotes] = useState<string>('');
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const h2Areas = horizonItems.filter((h) => h.level === 2 && (!itemToEdit || h.id !== itemToEdit.id));
   const h4Visions = horizonItems.filter((h) => h.level === 4 && (!itemToEdit || h.id !== itemToEdit.id));
   const h5Purposes = horizonItems.filter((h) => h.level === 5 && (!itemToEdit || h.id !== itemToEdit.id));
+
+  // Find linked ancestor H4 for displaying inherited domain
+  const selectedH4ForH2 = useMemo(() => {
+    if (level !== 2 || !parentId) return undefined;
+    return horizonItems.find((h) => h.level === 4 && h.id === parentId);
+  }, [level, parentId, horizonItems]);
+
+  const selectedH2ForH3 = useMemo(() => {
+    if (level !== 3 || !parentId) return undefined;
+    return horizonItems.find((h) => h.level === 2 && h.id === parentId);
+  }, [level, parentId, horizonItems]);
+
+  const ancestorH4ForH3 = useMemo(() => {
+    if (!selectedH2ForH3) return undefined;
+    if (selectedH2ForH3.parentId) {
+      return horizonItems.find((h) => h.level === 4 && h.id === selectedH2ForH3.parentId);
+    }
+    return undefined;
+  }, [selectedH2ForH3, horizonItems]);
 
   useEffect(() => {
     setConfirmDelete(false);
@@ -44,6 +65,8 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
       setParentId(itemToEdit.parentId || '');
       setTargetDate(itemToEdit.targetDate || '');
       setKeyResults(itemToEdit.keyResults && itemToEdit.keyResults.length > 0 ? itemToEdit.keyResults : ['']);
+      setProgressRating(itemToEdit.progressRating);
+      setReviewNotes(itemToEdit.reviewNotes || '');
     } else {
       setLevel(defaultLevel);
       setTitle('');
@@ -54,6 +77,8 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
       setParentId(initialParent);
       setTargetDate('');
       setKeyResults(['']);
+      setProgressRating(undefined);
+      setReviewNotes('');
     }
   }, [itemToEdit, defaultLevel, defaultParentId, isOpen]);
 
@@ -99,27 +124,33 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
     }
 
     const filteredKeyResults = keyResults.map((k) => k.trim()).filter(Boolean);
+    // Horizon 4 (3-5 Year Vision) is the sole authority for Life Domain
+    const effectiveLifeDomain = level === 4 ? (lifeDomain || undefined) : undefined;
 
     if (itemToEdit) {
       updateHorizonItem(itemToEdit.id, {
         level,
         title: title.trim(),
         description: description.trim() || undefined,
-        lifeDomain: lifeDomain || undefined,
+        lifeDomain: effectiveLifeDomain,
         parentId: parentId || undefined,
         targetDate: targetDate || undefined,
         keyResults: filteredKeyResults.length > 0 ? filteredKeyResults : undefined,
+        progressRating,
+        reviewNotes: reviewNotes.trim() || undefined,
       });
     } else {
       addHorizonItem({
         level,
         title: title.trim(),
         description: description.trim() || undefined,
-        lifeDomain: lifeDomain || undefined,
+        lifeDomain: effectiveLifeDomain,
         parentId: parentId || undefined,
         targetDate: targetDate || undefined,
         keyResults: filteredKeyResults.length > 0 ? filteredKeyResults : undefined,
         status: 'active',
+        progressRating,
+        reviewNotes: reviewNotes.trim() || undefined,
       });
     }
 
@@ -129,7 +160,7 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
   const currentDef = HORIZON_DEFINITIONS[level];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
       <div className="bg-[#141414] rounded-2xl shadow-2xl border border-[#262626] w-full max-w-xl max-h-[90vh] overflow-y-auto">
         
         {/* Header */}
@@ -213,32 +244,112 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
             />
           </div>
 
-          {/* Life Domain Selector */}
-          <div>
-            <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-              <Tag className="w-3.5 h-3.5 text-[#C5A47E]" />
-              <span>Life Domain</span>
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {LIFE_DOMAINS.map((domain) => {
-                const isSelected = lifeDomain === domain;
-                return (
-                  <button
-                    key={domain}
-                    type="button"
-                    onClick={() => setLifeDomain(domain)}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#C5A47E]/20 text-[#C5A47E] border-[#C5A47E]/60 shadow-xs'
-                        : 'bg-[#191919] text-gray-400 border-[#262626] hover:bg-[#202020] hover:text-gray-200'
-                    }`}
-                  >
-                    {domain}
-                  </button>
-                );
-              })}
+          {/* Life Domain Handling: H4 is the single decider, others inherit dynamically */}
+          {level === 4 ? (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-[#C5A47E] uppercase tracking-wider flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-[#C5A47E]" />
+                  <span>Life Domain (H4 Authority)</span>
+                </label>
+                <span className="text-[10px] text-gray-400 font-medium">
+                  Sets domain for all child levels
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {LIFE_DOMAINS.map((domain) => {
+                  const isSelected = lifeDomain === domain;
+                  return (
+                    <button
+                      key={domain}
+                      type="button"
+                      onClick={() => setLifeDomain(domain)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#C5A47E]/20 text-[#C5A47E] border-[#C5A47E]/60 shadow-xs'
+                          : 'bg-[#191919] text-gray-400 border-[#262626] hover:bg-[#202020] hover:text-gray-200'
+                      }`}
+                    >
+                      {domain}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2">
+                Horizon 4 (3-5 Year Vision) defines the Life Domain. All child Areas of Focus (H2), 1-2 Year Goals (H3), and Projects (H1) inherit this domain automatically.
+              </p>
             </div>
-          </div>
+          ) : level === 2 ? (
+            <div className="bg-[#191919] border border-[#262626] rounded-xl p-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <div className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-[#C5A47E]" />
+                    <span>Inherited Life Domain</span>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    {selectedH4ForH2 ? (
+                      <>
+                        Inherited from H4 Vision:{' '}
+                        <strong className="text-white font-medium">{selectedH4ForH2.title}</strong>
+                      </>
+                    ) : (
+                      'Select a Linked Horizon 4 Vision below to inherit its Life Domain.'
+                    )}
+                  </p>
+                </div>
+                {selectedH4ForH2?.lifeDomain ? (
+                  <span className="px-3 py-1 text-xs font-semibold rounded-lg bg-[#C5A47E]/20 text-[#C5A47E] border border-[#C5A47E]/40 whitespace-nowrap">
+                    {selectedH4ForH2.lifeDomain}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-amber-400/90 font-mono bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40">
+                    Domain Pending
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : level === 3 ? (
+            <div className="bg-[#191919] border border-[#262626] rounded-xl p-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <div className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-[#C5A47E]" />
+                    <span>Inherited Life Domain</span>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    {ancestorH4ForH3 ? (
+                      <>
+                        Inherited from H4 Vision:{' '}
+                        <strong className="text-white font-medium">{ancestorH4ForH3.title}</strong>{' '}
+                        via Area ({selectedH2ForH3?.title})
+                      </>
+                    ) : selectedH2ForH3 ? (
+                      'Linked Area has no parent H4 Vision. Link an H4 Vision to that Area to inherit its Life Domain.'
+                    ) : (
+                      'Select a Linked H2 Area of Focus below to inherit its Life Domain from H4.'
+                    )}
+                  </p>
+                </div>
+                {ancestorH4ForH3?.lifeDomain ? (
+                  <span className="px-3 py-1 text-xs font-semibold rounded-lg bg-[#C5A47E]/20 text-[#C5A47E] border border-[#C5A47E]/40 whitespace-nowrap">
+                    {ancestorH4ForH3.lifeDomain}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-amber-400/90 font-mono bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40">
+                    Domain Pending
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="bg-[#191919] border border-[#262626] rounded-xl p-3 flex items-center gap-2.5 text-xs text-gray-400">
+              <Compass className="w-4 h-4 text-[#C5A47E] shrink-0" />
+              <span>
+                Horizon 5 represents overarching Purpose & Principles. Specific Life Domains are anchored at Horizon 4 (3-5 Year Vision).
+              </span>
+            </div>
+          )}
 
           {/* Alignment Link: For H3 Goals -> H2 Area of Focus dropdown */}
           {level === 3 && (
@@ -384,6 +495,70 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Progress / Health Rating & Review Notes */}
+          <div className="p-3.5 bg-[#191919] border border-[#262626] rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Star className="w-3.5 h-3.5 text-[#C5A47E]" />
+                <span>Status & Progress Rating (1 to 5)</span>
+              </label>
+              {progressRating && (
+                <button
+                  type="button"
+                  onClick={() => setProgressRating(undefined)}
+                  className="text-[11px] text-gray-500 hover:text-gray-300 underline cursor-pointer"
+                >
+                  Clear rating
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-5 gap-2">
+              {[
+                { score: 1, label: 'Stalled' },
+                { score: 2, label: 'Slow' },
+                { score: 3, label: 'On Track' },
+                { score: 4, label: 'Strong' },
+                { score: 5, label: 'Thriving' },
+              ].map((btn) => {
+                const isSelected = progressRating === btn.score;
+                return (
+                  <button
+                    key={btn.score}
+                    type="button"
+                    onClick={() => setProgressRating(btn.score)}
+                    className={`p-2 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
+                      isSelected
+                        ? 'bg-[#C5A47E] text-black border-[#C5A47E] shadow-sm font-bold'
+                        : 'bg-[#141414] text-gray-300 border-[#262626] hover:bg-[#202020] hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-0.5">
+                      <Star className={`w-3 h-3 ${isSelected ? 'fill-black text-black' : 'text-gray-400'}`} />
+                      <span className="text-xs font-bold">{btn.score}</span>
+                    </div>
+                    <span className={`text-[10px] ${isSelected ? 'text-black font-semibold' : 'text-gray-400'}`}>
+                      {btn.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                Evaluation & Reflection Notes (Optional)
+              </label>
+              <textarea
+                rows={2}
+                value={reviewNotes}
+                onChange={(e) => setReviewNotes(e.target.value)}
+                placeholder="Wins, friction, or adjustments for upcoming weeks..."
+                className="w-full px-3 py-2 text-xs bg-[#141414] border border-[#262626] rounded-lg text-gray-200 placeholder-gray-500 focus:outline-hidden focus:border-[#C5A47E]"
+              />
             </div>
           </div>
 

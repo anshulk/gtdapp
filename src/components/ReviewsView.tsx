@@ -13,7 +13,9 @@ import {
   AlertTriangle,
   History,
   FileText,
-  Trash2
+  Trash2,
+  Compass,
+  Star
 } from 'lucide-react';
 import { useGTD } from '../context/GTDContext';
 import { WeeklyReviewRecord } from '../types/gtd';
@@ -28,6 +30,7 @@ export const ReviewsView: React.FC = () => {
     deleteReview,
     projects = [],
     actions = [],
+    horizonItems = [],
   } = useGTD();
 
   const [reviewToDelete, setReviewToDelete] = useState<WeeklyReviewRecord | null>(null);
@@ -40,83 +43,80 @@ export const ReviewsView: React.FC = () => {
     <div className="space-y-8 pb-16">
       
       {/* Top Banner */}
-      <div className="bg-[#141414] rounded-2xl border border-[#262626] p-6 sm:p-8 shadow-md">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#C5A47E]/10 text-[#C5A47E] text-xs font-bold border border-[#C5A47E]/20">
-              <CalendarCheck className="w-3.5 h-3.5" />
-              <span>GTD Weekly Review Ritual</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white font-serif">
-              Weekly Reviews & System Health
+      <div className="bg-[#141414] rounded-xl border border-[#262626] p-3.5 sm:p-4 shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-base sm:text-lg font-bold tracking-tight text-white font-serif flex items-center gap-2">
+              <CalendarCheck className="w-4 h-4 text-[#C5A47E]" />
+              <span>Weekly Reviews & System Health</span>
             </h1>
-            <p className="text-gray-400 text-sm max-w-2xl leading-relaxed">
-              "The Weekly Review is the master key to maintaining a trusted GTD system. Without it, the brain stops trusting the lists and slips back into anxiety." — David Allen
-            </p>
+            <span className="text-[11px] font-mono text-[#C5A47E] px-2 py-0.5 rounded-md bg-[#C5A47E]/10 border border-[#C5A47E]/20">
+              GTD Review Ritual
+            </span>
           </div>
 
           <button
             onClick={() => setWeeklyReviewOpen(true)}
-            className="px-5 py-3 bg-[#C5A47E] hover:bg-[#b8946e] active:bg-[#a8845e] text-black text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+            className="px-3 py-1.5 bg-[#C5A47E] hover:bg-[#b8946e] active:bg-[#a8845e] text-black text-xs font-bold rounded-lg shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
           >
-            <Sparkles className="w-4 h-4" />
+            <Sparkles className="w-3.5 h-3.5" />
             <span>Launch Guided Review</span>
           </button>
         </div>
 
         {/* Status Callout Strip */}
-        <div className="mt-8 pt-6 border-t border-[#262626] grid grid-cols-1 sm:grid-cols-4 gap-4">
-          <div className="p-4 rounded-xl bg-[#191919] border border-[#262626] flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-[#C5A47E]/10 text-[#C5A47E] border border-[#C5A47E]/20">
-              <CalendarCheck className="w-5 h-5" />
+        <div className="mt-3 pt-3 border-t border-[#202020] grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="p-2.5 rounded-lg bg-[#191919] border border-[#242424] flex items-center gap-2.5">
+            <div className="p-1.5 rounded-md bg-[#C5A47E]/10 text-[#C5A47E] border border-[#C5A47E]/20">
+              <CalendarCheck className="w-4 h-4" />
             </div>
             <div>
-              <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
                 Total Reviews
               </span>
-              <span className="text-lg font-bold text-white font-serif">
+              <span className="text-sm font-bold text-white font-serif">
                 {totalReviews} Completed
               </span>
             </div>
           </div>
 
-          <div className="p-4 rounded-xl bg-[#191919] border border-[#262626] flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-amber-950/60 text-amber-400 border border-amber-800/40">
-              <Clock className="w-5 h-5" />
+          <div className="p-2.5 rounded-lg bg-[#191919] border border-[#242424] flex items-center gap-2.5">
+            <div className="p-1.5 rounded-md bg-amber-950/60 text-amber-400 border border-amber-800/40">
+              <Clock className="w-4 h-4" />
             </div>
             <div>
-              <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
                 Last Review
               </span>
-              <span className="text-lg font-bold text-white font-serif">
+              <span className="text-sm font-bold text-white font-serif">
                 {daysSinceReview !== null ? `${daysSinceReview}d ago` : 'None yet'}
               </span>
             </div>
           </div>
 
-          <div className="p-4 rounded-xl bg-[#191919] border border-[#262626] flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl ${isReviewDue ? 'bg-rose-950/60 text-rose-400 border border-rose-800/40' : 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/40'}`}>
-              <Flame className="w-5 h-5" />
+          <div className="p-2.5 rounded-lg bg-[#191919] border border-[#242424] flex items-center gap-2.5">
+            <div className={`p-1.5 rounded-md ${isReviewDue ? 'bg-rose-950/60 text-rose-400 border border-rose-800/40' : 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/40'}`}>
+              <Flame className="w-4 h-4" />
             </div>
             <div>
-              <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
                 Review Cadence
               </span>
-              <span className={`text-lg font-bold font-serif ${isReviewDue ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {isReviewDue ? 'Review Due Now' : 'Up to Date'}
+              <span className={`text-sm font-bold font-serif ${isReviewDue ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {isReviewDue ? 'Review Due' : 'Up to Date'}
               </span>
             </div>
           </div>
 
-          <div className="p-4 rounded-xl bg-[#191919] border border-[#262626] flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-neutral-800 text-gray-300 border border-[#262626]">
-              <Briefcase className="w-5 h-5" />
+          <div className="p-2.5 rounded-lg bg-[#191919] border border-[#242424] flex items-center gap-2.5">
+            <div className="p-1.5 rounded-md bg-neutral-800 text-gray-300 border border-[#242424]">
+              <Briefcase className="w-4 h-4" />
             </div>
             <div>
-              <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider block">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
                 Active Projects
               </span>
-              <span className="text-lg font-bold text-white font-serif">
+              <span className="text-sm font-bold text-white font-serif">
                 {activeProjectsCount} Tracked
               </span>
             </div>
@@ -250,6 +250,52 @@ export const ReviewsView: React.FC = () => {
                           {fa}
                         </span>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Horizon Altitude Evaluations */}
+                  {review.horizonRatings && Object.keys(review.horizonRatings).length > 0 && (
+                    <div className="space-y-1.5 pt-2 border-t border-[#222]">
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <Compass className="w-3.5 h-3.5 text-[#C5A47E]" />
+                        <span>Horizon Progress Evaluations ({Object.keys(review.horizonRatings).length}):</span>
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {(Object.entries(review.horizonRatings) as [string, { rating: number; notes?: string; status?: string; title?: string; level?: number }][]).map(([hId, val]) => {
+                          const horizon = horizonItems.find((h) => h.id === hId);
+                          const title = val.title || horizon?.title || 'Horizon Item';
+                          const level = val.level || horizon?.level || 2;
+                          return (
+                            <div
+                              key={hId}
+                              className="p-2.5 bg-[#191919] rounded-xl border border-[#262626] flex items-start justify-between gap-2 text-xs"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-mono font-bold text-[#C5A47E]">
+                                    H{level}
+                                  </span>
+                                  <span className="font-semibold text-gray-200 truncate">
+                                    {title}
+                                  </span>
+                                </div>
+                                {val.notes && (
+                                  <p className="text-[11px] text-gray-400 mt-1 italic line-clamp-2">
+                                    "{val.notes}"
+                                  </p>
+                                )}
+                              </div>
+
+                              {val.rating > 0 && (
+                                <span className="shrink-0 px-2 py-0.5 rounded-md bg-amber-950/40 text-amber-300 border border-amber-800/30 text-xs font-mono font-bold flex items-center gap-1">
+                                  <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                                  <span>{val.rating}/5</span>
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>

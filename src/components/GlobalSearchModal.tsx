@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useGTD } from '../context/GTDContext';
 import { GTDAction, GTDProject, HorizonItem, ActiveTab } from '../types/gtd';
+import { getHorizonItemDomain, getProjectInheritedDomain } from '../utils/domainHierarchy';
 
 type SearchCategory = 'all' | 'actions' | 'projects' | 'horizons' | 'waiting' | 'inbox' | 'someday';
 
@@ -194,10 +195,11 @@ export const GlobalSearchModal: React.FC = () => {
 
     // 2. Projects
     projects.forEach((proj) => {
+      const projDomain = getProjectInheritedDomain(proj, horizonItems);
       const matches = !query ||
         proj.title.toLowerCase().includes(query) ||
         (proj.desiredOutcome && proj.desiredOutcome.toLowerCase().includes(query)) ||
-        (proj.lifeDomain && proj.lifeDomain.toLowerCase().includes(query)) ||
+        (projDomain && projDomain.toLowerCase().includes(query)) ||
         proj.status.toLowerCase().includes(query);
 
       if (!matches) return;
@@ -212,7 +214,7 @@ export const GlobalSearchModal: React.FC = () => {
         id: proj.id,
         category: 'project',
         title: proj.title,
-        subtitle: proj.desiredOutcome ? `Outcome: ${proj.desiredOutcome}` : `Domain: ${proj.lifeDomain || 'Professional'}`,
+        subtitle: proj.desiredOutcome ? `Outcome: ${proj.desiredOutcome}` : (projDomain ? `Domain: ${projDomain}` : undefined),
         badge: statusBadge.label,
         badgeColor: statusBadge.color,
         icon: <Briefcase className="w-4 h-4 text-emerald-400" />,
@@ -223,10 +225,11 @@ export const GlobalSearchModal: React.FC = () => {
 
     // 3. Horizons of Focus (H5, H4, H3, H2)
     horizonItems.forEach((h) => {
+      const hDomain = getHorizonItemDomain(h, horizonItems);
       const matches = !query ||
         h.title.toLowerCase().includes(query) ||
         (h.description && h.description.toLowerCase().includes(query)) ||
-        (h.lifeDomain && h.lifeDomain.toLowerCase().includes(query));
+        (hDomain && hDomain.toLowerCase().includes(query));
 
       if (!matches) return;
 

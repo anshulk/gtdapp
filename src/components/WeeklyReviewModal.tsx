@@ -20,8 +20,11 @@ import {
   Calendar,
   Layers,
   ChevronRight,
+  ChevronLeft,
   ListTodo,
-  Edit3
+  Edit3,
+  Star,
+  SlidersHorizontal
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useGTD } from '../context/GTDContext';
@@ -34,12 +37,19 @@ interface WeeklyReviewModalProps {
   onClose: () => void;
 }
 
+interface HorizonReviewState {
+  rating: number; // 0 = unrated, 1-5
+  notes: string;
+  status: 'active' | 'achieved' | 'archived';
+}
+
 export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, onClose }) => {
   const {
     actions = [],
     projects = [],
     horizonItems = [],
     recordWeeklyReview,
+    updateHorizonItem,
     toggleActionComplete,
     addAction,
     deleteAction,
@@ -53,12 +63,34 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
   const [reviewStartTime] = useState<number>(() => Date.now());
   const [editingAction, setEditingAction] = useState<GTDAction | null>(null);
 
+  // Horizons review interactive state
+  const [horizonRatings, setHorizonRatings] = useState<Record<string, HorizonReviewState>>({});
+  const [horizonReviewIndex, setHorizonReviewIndex] = useState(0);
+  const [horizonsViewMode, setHorizonsViewMode] = useState<'step' | 'list'>('step');
+
   // Mind sweep capture input
   const [sweepInput, setSweepInput] = useState('');
   const [activeTriggerCategory, setActiveTriggerCategory] = useState(0);
   
   // Stalled project action input
   const [stalledInputs, setStalledInputs] = useState<{ [id: string]: string }>({});
+
+  // Reset or initialize on open
+  useEffect(() => {
+    if (isOpen) {
+      setCurrentStepIndex(0);
+      setHorizonReviewIndex(0);
+      const initial: Record<string, HorizonReviewState> = {};
+      horizonItems.forEach((h) => {
+        initial[h.id] = {
+          rating: h.progressRating || 0,
+          notes: h.reviewNotes || '',
+          status: h.status || 'active',
+        };
+      });
+      setHorizonRatings(initial);
+    }
+  }, [isOpen, horizonItems]);
 
   if (!isOpen) return null;
 
@@ -68,82 +100,79 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
   const activeProjectsList = projects.filter((p) => p.status === 'active');
   const somedayItems = actions.filter((a) => a.type === 'someday-maybe' && !a.completed);
 
+  // Sort horizons from high altitude (H5) down to ground altitude (H2)
+  const sortedHorizons = [...horizonItems].sort((a, b) => b.level - a.level);
+  const evaluatedHorizonCount = (Object.values(horizonRatings) as HorizonReviewState[]).filter((v) => v.rating > 0).length;
+
   const steps = [
     {
       phase: 'PHASE 1: GET CLEAR',
-      title: '1.1 Collect Loose Papers & Physical Items',
-      description: 'Gather all receipts, business cards, paper notes, physical mail, and voice memos into your Inbox container.',
-      icon: <Layers className="w-5 h-5 text-indigo-600" />,
-      type: 'checklist_physical',
-    },
-    {
-      phase: 'PHASE 1: GET CLEAR',
-      title: '1.2 Get "IN" to Zero',
+      title: '1.1 Get "IN" to Zero',
       description: 'Process all loose inboxes completely. Decide: Actionable? 2-minute rule? Delegate? Defer? Project? Trash?',
-      icon: <Inbox className="w-5 h-5 text-indigo-600" />,
+      icon: <Inbox className="w-5 h-5 text-indigo-400" />,
       type: 'inbox_zero',
     },
     {
       phase: 'PHASE 1: GET CLEAR',
-      title: '1.3 Empty Your Head (Mind Sweep)',
+      title: '1.2 Empty Your Head (Mind Sweep)',
       description: 'Use the David Allen Incompletion Trigger List to sweep any uncaptured mental open loops from your mind.',
-      icon: <Brain className="w-5 h-5 text-purple-600" />,
+      icon: <Brain className="w-5 h-5 text-purple-400" />,
       type: 'mind_sweep',
     },
     {
       phase: 'PHASE 2: GET CURRENT',
       title: '2.1 Review Past Calendar (Last 14 Days)',
       description: 'Look back at the last 2 weeks on your calendar. Did any meeting spark an uncaptured next action or follow-up promise?',
-      icon: <Calendar className="w-5 h-5 text-amber-600" />,
+      icon: <Calendar className="w-5 h-5 text-amber-400" />,
       type: 'past_calendar',
     },
     {
       phase: 'PHASE 2: GET CURRENT',
       title: '2.2 Review Upcoming Calendar (Next 30 Days)',
       description: 'Look forward at upcoming appointments, travel, and deadlines. What actions need preparation now?',
-      icon: <Calendar className="w-5 h-5 text-amber-600" />,
+      icon: <Calendar className="w-5 h-5 text-amber-400" />,
       type: 'upcoming_calendar',
     },
     {
       phase: 'PHASE 2: GET CURRENT',
       title: '2.3 Review Waiting For Radar',
       description: 'Follow up on delegated commitments. Send gentle reminders or mark received deliverables as completed.',
-      icon: <Clock className="w-5 h-5 text-amber-600" />,
+      icon: <Clock className="w-5 h-5 text-amber-400" />,
       type: 'waiting_for',
     },
     {
       phase: 'PHASE 2: GET CURRENT',
       title: '2.4 Review Active Projects (Eliminate Stalls)',
       description: 'Review every single active project. Ensure EVERY project has at least ONE crisp physical next action defined.',
-      icon: <Briefcase className="w-5 h-5 text-amber-600" />,
+      icon: <Briefcase className="w-5 h-5 text-amber-400" />,
       type: 'projects_review',
     },
     {
       phase: 'PHASE 2: GET CURRENT',
       title: '2.5 Review Next Actions Lists',
       description: 'Mark off completed actions, remove obsolete tasks, and clarify next steps.',
-      icon: <CheckCircle2 className="w-5 h-5 text-emerald-600" />,
+      icon: <CheckCircle2 className="w-5 h-5 text-emerald-400" />,
       type: 'next_actions',
     },
     {
-      phase: 'PHASE 3: GET CREATIVE',
+      phase: 'PHASE 3: GET CREATIVE & ALIGNED',
       title: '3.1 Review Someday / Maybe Incubator',
       description: 'Review ideas parked for the future. Do any sparks deserve activation into current active projects this week?',
-      icon: <Sparkles className="w-5 h-5 text-purple-600" />,
+      icon: <Sparkles className="w-5 h-5 text-purple-400" />,
       type: 'someday_maybe',
     },
     {
-      phase: 'PHASE 3: GET CREATIVE',
-      title: '3.2 Review Horizons 2 to 5 (Altitude Alignment)',
-      description: 'Reflect on your Areas of Focus (H2), 1-2 Year Goals (H3), 3-5 Year Vision (H4), and Purpose (H5).',
-      icon: <Compass className="w-5 h-5 text-indigo-600" />,
+      phase: 'PHASE 3: GET CREATIVE & ALIGNED',
+      title: '3.2 Horizon Altitude Progress & Evaluation',
+      description: 'Step through each Horizon of Focus (H2 to H5), rate your progress and status out of 5, and record reflection notes.',
+      icon: <Compass className="w-5 h-5 text-[#C5A47E]" />,
       type: 'horizons_review',
     },
     {
-      phase: 'PHASE 3: GET CREATIVE',
+      phase: 'PHASE 3: GET CREATIVE & ALIGNED',
       title: '3.3 Weekly Synthesis & Celebration',
       description: 'Set your focus intention for the upcoming week and record your weekly review completion.',
-      icon: <PartyPopper className="w-5 h-5 text-emerald-600" />,
+      icon: <PartyPopper className="w-5 h-5 text-emerald-400" />,
       type: 'complete',
     },
   ];
@@ -165,14 +194,41 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
     }
   };
 
+  const handleSetHorizonRating = (horizonId: string, rating: number) => {
+    setHorizonRatings((prev) => ({
+      ...prev,
+      [horizonId]: {
+        ...(prev[horizonId] || { notes: '', status: 'active' }),
+        rating,
+      },
+    }));
+  };
+
+  const handleSetHorizonNotes = (horizonId: string, notes: string) => {
+    setHorizonRatings((prev) => ({
+      ...prev,
+      [horizonId]: {
+        ...(prev[horizonId] || { rating: 0, status: 'active' }),
+        notes,
+      },
+    }));
+  };
+
+  const handleUpdateHorizonStatus = (horizonId: string, status: 'active' | 'achieved' | 'archived') => {
+    setHorizonRatings((prev) => ({
+      ...prev,
+      [horizonId]: {
+        ...(prev[horizonId] || { rating: 0, notes: '' }),
+        status,
+      },
+    }));
+  };
+
   const handleSweepCapture = (e: React.FormEvent) => {
     e.preventDefault();
     if (!sweepInput.trim()) return;
     addAction({
       title: sweepInput.trim(),
-      context: '@computer',
-      energy: 'medium',
-      timeEstimate: '15-30m',
       type: 'inbox',
       priority: 'medium',
     });
@@ -185,9 +241,6 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
     addAction({
       title: text,
       projectId: projId,
-      context: '@computer',
-      energy: 'medium',
-      timeEstimate: '15-30m',
       type: 'action',
       priority: 'high',
     });
@@ -197,6 +250,20 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
   const handleFinishReview = () => {
     const elapsedMinutes = Math.max(1, Math.round((Date.now() - reviewStartTime) / 60000));
 
+    // Save ratings, notes, and updated status to each horizon item
+    (Object.entries(horizonRatings) as [string, HorizonReviewState][]).forEach(([hId, val]) => {
+      if (val.rating > 0 || val.notes.trim()) {
+        updateHorizonItem(hId, {
+          progressRating: val.rating > 0 ? val.rating : undefined,
+          reviewNotes: val.notes.trim() || undefined,
+          status: val.status,
+          lastReviewedAt: new Date().toISOString(),
+        });
+      }
+    });
+
+    const evaluatedCount = (Object.values(horizonRatings) as HorizonReviewState[]).filter((v) => v.rating > 0).length;
+
     recordWeeklyReview({
       completedAt: new Date().toISOString(),
       durationMinutes: elapsedMinutes,
@@ -204,8 +271,23 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
       projectsReviewed: activeProjectsList.length,
       nextActionsReviewed: activeNextActions.length,
       newActionsCreated: 3,
-      reflectionNotes: reflectionNotes.trim() || 'Weekly review completed with high clarity and altitude alignment.',
+      reflectionNotes: reflectionNotes.trim() || `Weekly review completed. ${evaluatedCount} Horizons evaluated for altitude alignment.`,
       focusAreasForUpcomingWeek: focusAreas.length > 0 ? focusAreas : ['Craft & Engineering', 'Health & Vitality'],
+      horizonRatings: Object.fromEntries(
+        (Object.entries(horizonRatings) as [string, HorizonReviewState][]).map(([id, val]) => {
+          const item = horizonItems.find((h) => h.id === id);
+          return [
+            id,
+            {
+              rating: val.rating,
+              notes: val.notes.trim() || undefined,
+              status: val.status,
+              title: item?.title,
+              level: item?.level,
+            },
+          ];
+        })
+      ),
     });
 
     // Fire celebratory confetti!
@@ -277,41 +359,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
 
           {/* STEP CONTENT SWITCHER */}
           
-          {/* 1.1 Physical Collection */}
-          {currentStep.type === 'checklist_physical' && (
-            <div className="space-y-4 text-xs text-gray-300">
-              <div className="p-4 bg-[#191919] rounded-xl border border-[#262626] space-y-2">
-                <p className="font-semibold text-white font-serif">
-                  GTD Principle: "Your mind is for having ideas, not holding them."
-                </p>
-                <p className="text-gray-400">
-                  Walk around your workspace and house. Empty receipts from your wallet, gather sticky notes from your monitor, collect mail from the entryway.
-                </p>
-              </div>
-
-              <div className="space-y-2.5">
-                {[
-                  'Clean physical desktop and workspace surface',
-                  'Gather all paper notes, receipts, and business cards',
-                  'Review phone camera roll or screenshots for saved info',
-                  'Empty physical notebook or journal scratchpad',
-                ].map((item, idx) => (
-                  <label
-                    key={idx}
-                    className="flex items-center gap-3 p-3 bg-[#191919] border border-[#262626] rounded-xl hover:bg-[#202020] cursor-pointer shadow-xs transition-colors"
-                  >
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 text-[#C5A47E] rounded border-gray-600 focus:ring-[#C5A47E] cursor-pointer bg-[#141414]"
-                    />
-                    <span className="font-medium text-gray-200">{item}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 1.2 Get IN to Zero */}
+          {/* 1.1 Get IN to Zero */}
           {currentStep.type === 'inbox_zero' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -620,9 +668,12 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
-                      <span className="text-[10px] font-mono text-[#C5A47E] bg-[#141414] border border-[#262626] px-1.5 py-0.5 rounded">
-                        {act.context}
-                      </span>
+                      {act.tags && act.tags.length > 0 && (
+                        <span className="text-[10px] font-mono text-[#C5A47E] bg-[#141414] border border-[#262626] px-1.5 py-0.5 rounded">
+                          {act.tags[0]}
+                          {act.tags.length > 1 ? ` +${act.tags.length - 1}` : ''}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -662,9 +713,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
                         onClick={() => {
                           addAction({
                             title: item.title,
-                            context: '@computer',
-                            energy: 'medium',
-                            timeEstimate: '1-2h',
+                            tags: item.tags,
                             type: 'action',
                             priority: 'medium',
                           });
@@ -683,39 +732,347 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
 
           {/* 3.2 Horizons Review */}
           {currentStep.type === 'horizons_review' && (
-            <div className="space-y-4 text-xs">
-              <div className="p-4 bg-[#191919] rounded-xl border border-[#262626] space-y-1">
-                <p className="font-bold text-white font-serif">High-Altitude Alignment Check</p>
-                <p className="text-gray-400">
-                  Review your 50k ft Life Purpose, 40k ft Vision, 30k ft Goals, and 20k ft Areas of Focus. Are your active projects serving your highest aspirations?
-                </p>
+            <div className="space-y-4">
+              {/* Header Context / Progress Bar */}
+              <div className="p-3.5 bg-[#191919] rounded-xl border border-[#262626] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white font-serif text-sm">
+                      Horizon Progress & Altitude Audit
+                    </span>
+                    <span className="text-[11px] font-mono text-[#C5A47E] bg-[#C5A47E]/10 border border-[#C5A47E]/20 px-2 py-0.5 rounded-full">
+                      {evaluatedHorizonCount} of {sortedHorizons.length} evaluated
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Evaluate progress out of 5 and capture reflection notes for each horizon of focus.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-1.5 self-start sm:self-auto bg-[#141414] p-1 rounded-lg border border-[#262626]">
+                  <button
+                    type="button"
+                    onClick={() => setHorizonsViewMode('step')}
+                    className={`px-2.5 py-1 text-xs rounded-md font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
+                      horizonsViewMode === 'step'
+                        ? 'bg-[#C5A47E] text-black shadow-xs'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <SlidersHorizontal className="w-3 h-3" />
+                    <span>Focus View</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHorizonsViewMode('list')}
+                    className={`px-2.5 py-1 text-xs rounded-md font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
+                      horizonsViewMode === 'list'
+                        ? 'bg-[#C5A47E] text-black shadow-xs'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <ListTodo className="w-3 h-3" />
+                    <span>All Items ({sortedHorizons.length})</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="space-y-2 max-h-56 overflow-y-auto">
-                {horizonItems.map((h) => {
-                  const linkedArea = h.level === 3 && h.parentId ? horizonItems.find((a) => a.id === h.parentId) : null;
-                  return (
-                    <div
-                      key={h.id}
-                      className="p-3 bg-[#191919] border border-[#262626] rounded-xl flex items-center justify-between"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-mono font-bold text-[#C5A47E] uppercase">
-                            H{h.level} • {HORIZON_DEFINITIONS[h.level]?.shortName || 'Horizon'}
+              {sortedHorizons.length === 0 ? (
+                <div className="p-8 bg-[#191919] border border-[#262626] rounded-2xl text-center space-y-2">
+                  <Compass className="w-8 h-8 text-[#C5A47E] mx-auto opacity-70" />
+                  <h4 className="text-sm font-bold text-white font-serif">No Horizon Items Defined Yet</h4>
+                  <p className="text-xs text-gray-400 max-w-sm mx-auto">
+                    Define your Areas of Focus (H2), Goals (H3), Vision (H4), and Purpose (H5) in the Horizons tab to align daily execution with your overarching life direction.
+                  </p>
+                </div>
+              ) : horizonsViewMode === 'step' ? (
+                /* Step-Through Guided Mode */
+                <div className="space-y-3">
+                  {/* Horizon Item Selector Pills */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+                    {sortedHorizons.map((h, idx) => {
+                      const rating = horizonRatings[h.id]?.rating || 0;
+                      const isCurrent = idx === horizonReviewIndex;
+                      const def = HORIZON_DEFINITIONS[h.level];
+                      return (
+                        <button
+                          key={h.id}
+                          type="button"
+                          onClick={() => setHorizonReviewIndex(idx)}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold shrink-0 flex items-center gap-1.5 transition-all cursor-pointer border ${
+                            isCurrent
+                              ? 'bg-[#252525] text-white border-[#C5A47E] shadow-sm'
+                              : 'bg-[#191919] text-gray-400 border-[#262626] hover:bg-[#202020]'
+                          }`}
+                        >
+                          <span className={`text-[10px] font-mono font-bold ${def?.color?.badge || 'text-[#C5A47E]'}`}>
+                            H{h.level}
                           </span>
-                          {linkedArea && (
-                            <span className="text-[10px] text-emerald-400 font-medium">
-                              (Area: {linkedArea.title})
+                          <span className="truncate max-w-[120px]">{h.title}</span>
+                          {rating > 0 ? (
+                            <span className="px-1 py-0.2 rounded bg-amber-950/60 text-amber-300 font-mono text-[10px] font-bold flex items-center gap-0.5">
+                              <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
+                              <span>{rating}</span>
                             </span>
+                          ) : (
+                            <span className="w-2 h-2 rounded-full bg-gray-600" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Active Horizon Card */}
+                  {(() => {
+                    const currentH = sortedHorizons[horizonReviewIndex] || sortedHorizons[0];
+                    if (!currentH) return null;
+                    const def = HORIZON_DEFINITIONS[currentH.level];
+                    const entry = horizonRatings[currentH.id] || { rating: 0, notes: '', status: currentH.status || 'active' };
+                    const linkedParent = currentH.parentId ? horizonItems.find((p) => p.id === currentH.parentId) : null;
+                    const linkedProjects = projects.filter(
+                      (p) => (p.areaId === currentH.id || p.goalId === currentH.id) && p.status === 'active'
+                    );
+
+                    return (
+                      <div className="bg-[#191919] border border-[#2a2a2a] rounded-2xl p-4 sm:p-5 space-y-4 shadow-md">
+                        {/* Top Badges */}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${def?.color?.badge || 'border-[#C5A47E]/30 text-[#C5A47E] bg-[#C5A47E]/10'} font-mono`}>
+                              H{currentH.level} • {def?.name || 'Horizon'} ({def?.altitude || ''})
+                            </span>
+                            {currentH.lifeDomain && (
+                              <span className="text-[11px] text-gray-400 bg-[#141414] px-2 py-0.5 rounded-md border border-[#262626]">
+                                {currentH.lifeDomain}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Status Selector */}
+                          <div className="flex items-center gap-1 bg-[#141414] p-1 rounded-lg border border-[#262626]">
+                            {(['active', 'achieved', 'archived'] as const).map((st) => (
+                              <button
+                                key={st}
+                                type="button"
+                                onClick={() => handleUpdateHorizonStatus(currentH.id, st)}
+                                className={`px-2 py-0.5 text-[10px] font-bold rounded capitalize transition-colors cursor-pointer ${
+                                  entry.status === st
+                                    ? st === 'achieved'
+                                      ? 'bg-emerald-900/60 text-emerald-300 border border-emerald-700/50'
+                                      : st === 'archived'
+                                      ? 'bg-gray-800 text-gray-300'
+                                      : 'bg-[#C5A47E] text-black'
+                                    : 'text-gray-400 hover:text-white'
+                                }`}
+                              >
+                                {st}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Title and Description */}
+                        <div>
+                          <h3 className="text-base font-bold text-white font-serif">
+                            {currentH.title}
+                          </h3>
+                          {currentH.description && (
+                            <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                              {currentH.description}
+                            </p>
+                          )}
+                          {linkedParent && (
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Aligned to: H{linkedParent.level} {linkedParent.title}
+                            </p>
                           )}
                         </div>
-                        <p className="font-bold text-white mt-0.5">{h.title}</p>
+
+                        {/* Linked Active Projects Reality Check */}
+                        {linkedProjects.length > 0 && (
+                          <div className="p-2.5 rounded-lg bg-[#141414] border border-[#242424] space-y-1">
+                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
+                              Connected Active Projects ({linkedProjects.length})
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {linkedProjects.map((p) => (
+                                <span
+                                  key={p.id}
+                                  className="text-[11px] text-gray-300 bg-[#1e1e1e] px-2 py-0.5 rounded border border-[#2a2a2a]"
+                                >
+                                  {p.title}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 1 to 5 Rating Section */}
+                        <div className="space-y-2 pt-2 border-t border-[#262626]">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                              <Star className="w-3.5 h-3.5 text-[#C5A47E]" />
+                              <span>Rate Progress / Health (1 to 5)</span>
+                            </label>
+                            {entry.rating > 0 && (
+                              <span className="text-xs font-bold text-[#C5A47E]">
+                                {entry.rating === 1 && '1 • Needs Attention / Stalled'}
+                                {entry.rating === 2 && '2 • Slow Progress'}
+                                {entry.rating === 3 && '3 • Steady & On Track'}
+                                {entry.rating === 4 && '4 • Strong Momentum'}
+                                {entry.rating === 5 && '5 • Thriving & Exceptional'}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-5 gap-2">
+                            {[
+                              { score: 1, label: 'Stalled', desc: 'Needs Attention' },
+                              { score: 2, label: 'Slow', desc: 'Friction' },
+                              { score: 3, label: 'On Track', desc: 'Steady' },
+                              { score: 4, label: 'Strong', desc: 'Good Pace' },
+                              { score: 5, label: 'Thriving', desc: 'Exceptional' },
+                            ].map((btn) => {
+                              const isSelected = entry.rating === btn.score;
+                              return (
+                                <button
+                                  key={btn.score}
+                                  type="button"
+                                  onClick={() => handleSetHorizonRating(currentH.id, btn.score)}
+                                  className={`p-2 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                                    isSelected
+                                      ? 'bg-[#C5A47E] text-black border-[#C5A47E] shadow-sm font-bold scale-[1.02]'
+                                      : 'bg-[#141414] text-gray-300 border-[#262626] hover:bg-[#202020] hover:text-white'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-1">
+                                    <Star
+                                      className={`w-3.5 h-3.5 ${
+                                        isSelected ? 'fill-black text-black' : 'text-gray-400'
+                                      }`}
+                                    />
+                                    <span className="text-sm font-serif font-bold">{btn.score}</span>
+                                  </div>
+                                  <span className={`text-[10px] leading-tight ${isSelected ? 'text-black font-semibold' : 'text-gray-400'}`}>
+                                    {btn.label}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Optional Notes Input */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center justify-between">
+                            <span>Reflection Notes (Optional)</span>
+                            <span className="text-[10px] text-gray-500 font-normal">Wins, friction, or adjustments</span>
+                          </label>
+                          <textarea
+                            rows={2}
+                            value={entry.notes}
+                            onChange={(e) => handleSetHorizonNotes(currentH.id, e.target.value)}
+                            placeholder="e.g. Completed initial milestone; next step is quarterly budget review..."
+                            className="w-full px-3 py-2 text-xs bg-[#141414] border border-[#262626] rounded-xl focus:bg-[#1a1a1a] focus:outline-hidden focus:border-[#C5A47E] text-white placeholder-gray-500 leading-relaxed"
+                          />
+                        </div>
+
+                        {/* Sub-navigation within Horizons */}
+                        <div className="pt-2 border-t border-[#262626] flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => setHorizonReviewIndex((prev) => Math.max(0, prev - 1))}
+                            disabled={horizonReviewIndex === 0}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
+                              horizonReviewIndex === 0
+                                ? 'opacity-30 cursor-not-allowed text-gray-600'
+                                : 'text-gray-300 hover:text-white bg-[#141414] border border-[#262626]'
+                            }`}
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                            <span>Previous Horizon</span>
+                          </button>
+
+                          <span className="text-xs font-mono text-gray-400">
+                            {horizonReviewIndex + 1} of {sortedHorizons.length}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setHorizonReviewIndex((prev) =>
+                                Math.min(sortedHorizons.length - 1, prev + 1)
+                              )
+                            }
+                            disabled={horizonReviewIndex === sortedHorizons.length - 1}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
+                              horizonReviewIndex === sortedHorizons.length - 1
+                                ? 'opacity-30 cursor-not-allowed text-gray-600'
+                                : 'text-[#C5A47E] hover:text-white bg-[#141414] border border-[#C5A47E]/30'
+                            }`}
+                          >
+                            <span>Next Horizon</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })()}
+                </div>
+              ) : (
+                /* List View of All Horizons */
+                <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                  {sortedHorizons.map((h) => {
+                    const def = HORIZON_DEFINITIONS[h.level];
+                    const entry = horizonRatings[h.id] || { rating: 0, notes: '', status: h.status || 'active' };
+                    return (
+                      <div
+                        key={h.id}
+                        className="bg-[#191919] border border-[#262626] rounded-xl p-3.5 space-y-2.5"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-bold font-mono uppercase px-2 py-0.5 rounded border ${def?.color?.badge || 'text-[#C5A47E] border-[#C5A47E]/30'}`}>
+                              H{h.level}
+                            </span>
+                            <h4 className="text-xs font-bold text-white font-serif">{h.title}</h4>
+                            {h.lifeDomain && (
+                              <span className="text-[10px] text-gray-400">({h.lifeDomain})</span>
+                            )}
+                          </div>
+
+                          {/* 1-5 rating pills */}
+                          <div className="flex items-center gap-1">
+                            {[1, 2, 3, 4, 5].map((score) => (
+                              <button
+                                key={score}
+                                type="button"
+                                onClick={() => handleSetHorizonRating(h.id, score)}
+                                className={`w-6 h-6 rounded-md text-xs font-bold flex items-center justify-center transition-colors cursor-pointer ${
+                                  entry.rating === score
+                                    ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
+                                    : 'bg-[#141414] text-gray-400 hover:text-white border border-[#262626]'
+                                }`}
+                              >
+                                {score}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Notes input */}
+                        <input
+                          type="text"
+                          value={entry.notes}
+                          onChange={(e) => handleSetHorizonNotes(h.id, e.target.value)}
+                          placeholder="Optional notes or reflection for this horizon..."
+                          className="w-full px-2.5 py-1.5 text-xs bg-[#141414] border border-[#262626] rounded-lg text-white placeholder-gray-500 focus:outline-hidden focus:border-[#C5A47E]"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

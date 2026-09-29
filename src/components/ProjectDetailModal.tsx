@@ -17,14 +17,15 @@ import {
   Sparkles,
   Edit3,
   RotateCcw,
-  Flame
+  Flame,
+  Tag
 } from 'lucide-react';
-import { GTDProject, GTDAction, GTDContext, EnergyLevel, TimeEstimate, RecurrencePeriod } from '../types/gtd';
+import { GTDProject, GTDAction, RecurrencePeriod } from '../types/gtd';
 import { useGTD } from '../context/GTDContext';
-import { GTD_CONTEXT_OPTIONS } from '../data/gtdData';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { RecurringStreakBadge } from './RecurringStreakBadge';
 import { ActionEditModal } from './ActionEditModal';
+import { TagInput } from './TagInput';
 import { getActionStreakInfo, formatRecurrenceLabel } from '../utils/streakUtils';
 import { isProjectStalled } from '../utils/projectUtils';
 
@@ -43,6 +44,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
     projects = [],
     actions = [],
     horizonItems = [],
+    allTags = [],
     addAction,
     deleteAction,
     toggleActionComplete,
@@ -52,9 +54,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   } = useGTD();
 
   const [newActionTitle, setNewActionTitle] = useState('');
-  const [newActionContext, setNewActionContext] = useState<GTDContext>('@computer');
-  const [newActionEnergy, setNewActionEnergy] = useState<EnergyLevel>('medium');
-  const [newActionTime, setNewActionTime] = useState<TimeEstimate>('15-30m');
+  const [newActionTags, setNewActionTags] = useState<string[]>([]);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceCount, setRecurrenceCount] = useState(3);
   const [recurrencePeriod, setRecurrencePeriod] = useState<RecurrencePeriod>('week');
@@ -85,9 +85,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
     addAction({
       title: newActionTitle.trim(),
       projectId: project.id,
-      context: newActionContext,
-      energy: newActionEnergy,
-      timeEstimate: newActionTime,
+      tags: newActionTags.length > 0 ? newActionTags : undefined,
       type: 'action',
       priority: project.priority || 'medium',
       isRecurring: isRecurring,
@@ -102,6 +100,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
     });
 
     setNewActionTitle('');
+    setNewActionTags([]);
     setIsRecurring(false);
   };
 
@@ -249,55 +248,25 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                 className="w-full px-3 py-2 text-xs bg-[#141414] border border-[#262626] rounded-lg focus:outline-hidden focus:border-[#C5A47E] text-gray-200 placeholder-gray-500"
               />
               
-              {/* Context, Energy, Time, and Recurring Toggle */}
-              <div className="flex flex-wrap items-center justify-between gap-2.5 text-xs">
-                <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    value={newActionContext}
-                    onChange={(e) => setNewActionContext(e.target.value as GTDContext)}
-                    className="px-2 py-1 text-[11px] bg-[#141414] border border-[#262626] text-gray-200 rounded-md font-mono focus:border-[#C5A47E] focus:outline-hidden"
-                  >
-                    {GTD_CONTEXT_OPTIONS.map((c) => (
-                      <option key={c.value} value={c.value}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </select>
+              <TagInput
+                tags={newActionTags}
+                onChange={setNewActionTags}
+                suggestedTags={allTags}
+                placeholder="Add optional tags (e.g. @computer, urgent, deep-work)..."
+              />
 
-                  <select
-                    value={newActionEnergy}
-                    onChange={(e) => setNewActionEnergy(e.target.value as EnergyLevel)}
-                    className="px-2 py-1 text-[11px] bg-[#141414] border border-[#262626] text-gray-200 rounded-md focus:border-[#C5A47E] focus:outline-hidden"
-                  >
-                    <option value="low">Low Energy</option>
-                    <option value="medium">Medium Energy</option>
-                    <option value="high">High Energy</option>
-                  </select>
-
-                  <select
-                    value={newActionTime}
-                    onChange={(e) => setNewActionTime(e.target.value as TimeEstimate)}
-                    className="px-2 py-1 text-[11px] bg-[#141414] border border-[#262626] text-gray-200 rounded-md focus:border-[#C5A47E] focus:outline-hidden"
-                  >
-                    <option value="<15m">&lt;15 min</option>
-                    <option value="15-30m">15-30 min</option>
-                    <option value="30-60m">30-60 min</option>
-                    <option value="1-2h">1-2 hrs</option>
-                    <option value="2h+">2h+</option>
-                  </select>
-
-                  {/* Recurring routine toggle */}
-                  <label className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[#141414] border border-[#262626] text-gray-300 hover:text-white cursor-pointer select-none text-[11px]">
-                    <input
-                      type="checkbox"
-                      checked={isRecurring}
-                      onChange={(e) => setIsRecurring(e.target.checked)}
-                      className="rounded text-[#C5A47E] focus:ring-0 focus:ring-offset-0 bg-[#1E1E1E] border-gray-600 w-3.5 h-3.5 cursor-pointer"
-                    />
-                    <RotateCcw className="w-3 h-3 text-amber-400" />
-                    <span>Recurring / Habit</span>
-                  </label>
-                </div>
+              <div className="flex flex-wrap items-center justify-between gap-2.5 text-xs pt-1">
+                {/* Recurring routine toggle */}
+                <label className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[#141414] border border-[#262626] text-gray-300 hover:text-white cursor-pointer select-none text-[11px]">
+                  <input
+                    type="checkbox"
+                    checked={isRecurring}
+                    onChange={(e) => setIsRecurring(e.target.checked)}
+                    className="rounded text-[#C5A47E] focus:ring-0 focus:ring-offset-0 bg-[#1E1E1E] border-gray-600 w-3.5 h-3.5 cursor-pointer"
+                  />
+                  <RotateCcw className="w-3 h-3 text-amber-400" />
+                  <span>Recurring / Habit</span>
+                </label>
 
                 <button
                   type="submit"
@@ -397,15 +366,22 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-bold text-gray-100">{action.title}</span>
                           </div>
-                          <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
-                            <span className="font-mono bg-[#141414] border border-[#262626] text-[#C5A47E] px-1.5 py-0.2 rounded">
-                              {action.context}
-                            </span>
-                            <span>•</span>
-                            <span className="capitalize">{action.energy} energy</span>
-                            <span>•</span>
-                            <span>{action.timeEstimate}</span>
-                          </div>
+                          {action.tags && action.tags.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-gray-400">
+                              {action.tags.map((tag) => (
+                                <span
+                                  key={tag}
+                                  className={`px-1.5 py-0.2 rounded font-mono border ${
+                                    tag.startsWith('@')
+                                      ? 'bg-[#141414] border-[#C5A47E]/30 text-[#C5A47E]'
+                                      : 'bg-[#141414] border-[#262626] text-gray-300'
+                                  }`}
+                                >
+                                  {tag.startsWith('@') ? tag : `#${tag}`}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-1">
@@ -472,15 +448,22 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                           >
                             {action.title}
                           </p>
-                          <div className="flex items-center gap-1.5 text-[10px] text-gray-400 mt-1">
-                            <span className="font-mono bg-[#141414] border border-[#262626] text-[#C5A47E] px-1.5 py-0.2 rounded">
-                              {action.context}
-                            </span>
-                            <span>•</span>
-                            <span className="capitalize">{action.energy} energy</span>
-                            <span>•</span>
-                            <span>{action.timeEstimate}</span>
-                          </div>
+                          {action.tags && action.tags.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-gray-400 mt-1">
+                              {action.tags.map((tag) => (
+                                <span
+                                  key={tag}
+                                  className={`px-1.5 py-0.2 rounded font-mono border ${
+                                    tag.startsWith('@')
+                                      ? 'bg-[#141414] border-[#C5A47E]/30 text-[#C5A47E]'
+                                      : 'bg-[#141414] border-[#262626] text-gray-300'
+                                  }`}
+                                >
+                                  {tag.startsWith('@') ? tag : `#${tag}`}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
 

@@ -84,7 +84,7 @@ export const Navbar: React.FC = () => {
     }
   };
 
-  const navItems: { id: ActiveTab; label: string; icon: React.ReactNode; badge?: number; alert?: boolean }[] = [
+  const navItems: { id: ActiveTab; label: string; icon: React.ReactNode; badge?: number; alert?: boolean; alertTitle?: string }[] = [
     { id: 'dashboard', label: 'Cockpit', icon: <Layers className="w-4 h-4" /> },
     { id: 'horizons', label: 'Horizons of Focus', icon: <Compass className="w-4 h-4" /> },
     { 
@@ -92,20 +92,23 @@ export const Navbar: React.FC = () => {
       label: 'Projects', 
       icon: <Briefcase className="w-4 h-4" />,
       badge: projects.filter(p => p.status === 'active').length,
-      alert: stalledProjects.length > 0
+      alert: stalledProjects.length > 0,
+      alertTitle: `${stalledProjects.length} stalled project${stalledProjects.length === 1 ? '' : 's'} without a next action`
     },
     { 
       id: 'actions', 
       label: 'Actions & Lists', 
       icon: <CheckCircle2 className="w-4 h-4" />, 
       badge: nextActionsCount,
-      alert: inboxCount > 5
+      alert: inboxCount > 5,
+      alertTitle: `${inboxCount} unprocessed inbox items`
     },
     { 
       id: 'reviews', 
       label: 'Weekly Review', 
       icon: <CalendarCheck className="w-4 h-4" />,
-      alert: isReviewDue
+      alert: isReviewDue,
+      alertTitle: `Weekly review due (${daysSinceLastReview} days since last review)`
     },
   ];
 
@@ -436,7 +439,7 @@ export const Navbar: React.FC = () => {
                     className={`w-2 h-2 rounded-full ${
                       isActive ? 'bg-black' : 'bg-amber-400 ring-2 ring-[#0F0F0F]'
                     }`}
-                    title="Needs attention"
+                    title={item.alertTitle || "Needs attention"}
                   />
                 )}
               </button>

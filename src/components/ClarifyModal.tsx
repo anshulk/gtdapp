@@ -13,8 +13,8 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { useGTD } from '../context/GTDContext';
-import { GTDContext, EnergyLevel, TimeEstimate, GTDAction } from '../types/gtd';
-import { GTD_CONTEXT_OPTIONS } from '../data/gtdData';
+import { GTDAction } from '../types/gtd';
+import { TagInput } from './TagInput';
 
 export const ClarifyModal: React.FC = () => {
   const {
@@ -24,6 +24,7 @@ export const ClarifyModal: React.FC = () => {
     deleteAction,
     projects,
     horizonItems,
+    allTags = [],
   } = useGTD();
 
   const [decisionStep, setDecisionStep] = useState<
@@ -36,9 +37,7 @@ export const ClarifyModal: React.FC = () => {
 
   // Form states for conversion
   const [actionTitle, setActionTitle] = useState('');
-  const [context, setContext] = useState<GTDContext>('@computer');
-  const [energy, setEnergy] = useState<EnergyLevel>('medium');
-  const [timeEstimate, setTimeEstimate] = useState<TimeEstimate>('15-30m');
+  const [tags, setTags] = useState<string[]>([]);
   const [targetProjectId, setTargetProjectId] = useState('');
 
   // Delegate states
@@ -56,6 +55,7 @@ export const ClarifyModal: React.FC = () => {
       setDecisionStep('initial');
       setActionTitle(clarifyModalItem.title);
       setProjectTitle(clarifyModalItem.title);
+      setTags(clarifyModalItem.tags || []);
       setDesiredOutcome('');
       setDelegatedTo('');
       setFollowUpDate('');
@@ -128,9 +128,7 @@ export const ClarifyModal: React.FC = () => {
       type: 'action',
       title: actionTitle.trim() || clarifyModalItem.title,
       projectId: targetProjectId || undefined,
-      context,
-      energy,
-      timeEstimate,
+      tags: tags.length > 0 ? tags : undefined,
     });
     handleClose();
   };
@@ -142,9 +140,7 @@ export const ClarifyModal: React.FC = () => {
     convertInboxItem(clarifyModalItem.id, {
       type: 'action',
       title: actionTitle.trim() || `First step for ${projectTitle}`,
-      context,
-      energy,
-      timeEstimate,
+      tags: tags.length > 0 ? tags : undefined,
       newProjectData: {
         title: projectTitle.trim(),
         desiredOutcome: desiredOutcome.trim(),
@@ -376,56 +372,14 @@ export const ClarifyModal: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
-                    Context
-                  </label>
-                  <select
-                    value={context}
-                    onChange={(e) => setContext(e.target.value as GTDContext)}
-                    className="w-full px-2 py-1.5 bg-[#191919] border border-[#262626] rounded-lg font-mono text-gray-200 text-xs focus:border-[#C5A47E] focus:outline-hidden"
-                  >
-                    {GTD_CONTEXT_OPTIONS.map((c) => (
-                      <option key={c.value} value={c.value}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
-                    Energy
-                  </label>
-                  <select
-                    value={energy}
-                    onChange={(e) => setEnergy(e.target.value as EnergyLevel)}
-                    className="w-full px-2 py-1.5 bg-[#191919] border border-[#262626] rounded-lg text-gray-200 text-xs focus:border-[#C5A47E] focus:outline-hidden"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
-                    Time
-                  </label>
-                  <select
-                    value={timeEstimate}
-                    onChange={(e) => setTimeEstimate(e.target.value as TimeEstimate)}
-                    className="w-full px-2 py-1.5 bg-[#191919] border border-[#262626] rounded-lg text-gray-200 text-xs focus:border-[#C5A47E] focus:outline-hidden"
-                  >
-                    <option value="<15m">&lt;15m</option>
-                    <option value="15-30m">15-30m</option>
-                    <option value="30-60m">30-60m</option>
-                    <option value="1-2h">1-2h</option>
-                    <option value="2h+">2h+</option>
-                  </select>
-                </div>
-              </div>
+              <TagInput
+                tags={tags}
+                onChange={setTags}
+                suggestedTags={allTags}
+                label="Next Action Tags (Optional)"
+                placeholder="Add tags (e.g. @computer, urgent, deep-work)..."
+                helpText="Optional: Add multiple tags to organize your actions"
+              />
 
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">

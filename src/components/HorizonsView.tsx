@@ -17,12 +17,15 @@ import {
   Sparkles,
   ChevronRight,
   Filter,
-  Map,
-  Tag
+  Network,
+  Kanban,
+  Tag,
+  Star
 } from 'lucide-react';
 import { useGTD } from '../context/GTDContext';
 import { HORIZON_DEFINITIONS, LIFE_DOMAINS } from '../data/gtdData';
 import { HorizonLevel, HorizonItem } from '../types/gtd';
+import { getHorizonItemDomain } from '../utils/domainHierarchy';
 import { HorizonItemModal } from './HorizonItemModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { HorizonsMap } from './HorizonsMap';
@@ -46,7 +49,7 @@ export const HorizonsView: React.FC = () => {
   const [itemToDelete, setItemToDelete] = useState<HorizonItem | null>(null);
   const [defaultLevelForNew, setDefaultLevelForNew] = useState<HorizonLevel>(3);
   const [defaultParentIdForNew, setDefaultParentIdForNew] = useState<string | undefined>(undefined);
-  const [viewMode, setViewMode] = useState<'map' | 'cards'>('map');
+  const [viewMode, setViewMode] = useState<'graph' | 'kanban' | 'cards'>('graph');
 
   const handleOpenAddModal = (level: HorizonLevel = 3, parentId?: string) => {
     setItemToEdit(null);
@@ -78,7 +81,7 @@ export const HorizonsView: React.FC = () => {
   const filteredItems = useMemo(() => {
     return horizonItems.filter((item) => {
       if (selectedAltitude !== 'all' && item.level !== selectedAltitude) return false;
-      if (selectedLifeDomain !== 'all' && item.lifeDomain !== selectedLifeDomain) return false;
+      if (selectedLifeDomain !== 'all' && getHorizonItemDomain(item, horizonItems) !== selectedLifeDomain) return false;
       if (selectedAreaId !== 'all') {
         if (item.level === 2 && item.id !== selectedAreaId) return false;
         if (item.level === 3 && item.parentId !== selectedAreaId) return false;
@@ -92,61 +95,69 @@ export const HorizonsView: React.FC = () => {
     <div className="space-y-8 pb-16">
       
       {/* Header Banner */}
-      <div className="bg-[#141414] rounded-2xl border border-[#262626] p-4 sm:p-6 md:p-8 shadow-md">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
-          <div className="space-y-1.5 sm:space-y-2">
-            <div className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-full bg-[#C5A47E]/10 text-[#C5A47E] text-[11px] sm:text-xs font-bold border border-[#C5A47E]/20">
-              <Compass className="w-3.5 h-3.5" />
-              <span>David Allen's Horizons of Focus</span>
-            </div>
-            <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight text-white font-serif">
-              Vertical Alignment & Horizon Map
+      <div className="bg-[#141414] rounded-xl border border-[#262626] p-3 sm:p-4 shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-base sm:text-lg font-bold tracking-tight text-white font-serif flex items-center gap-2">
+              <Compass className="w-4 h-4 text-[#C5A47E]" />
+              <span>Horizons of Focus</span>
             </h1>
-            <p className="text-gray-400 text-xs sm:text-sm max-w-2xl leading-relaxed">
-              Explore your complete vertical altitude graph with central H5 Purpose branching into H4 Visions, H2 Areas, H3 Goals, H1 Projects, and leaf Next Actions.
-            </p>
+            <span className="text-[11px] font-mono text-[#C5A47E] px-2 py-0.5 rounded-md bg-[#C5A47E]/10 border border-[#C5A47E]/20 hidden sm:inline">
+              50k Purpose ➔ Runway
+            </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
             {/* View Mode Toggle */}
-            <div className="bg-[#1E1E1E] border border-[#262626] p-1 rounded-xl flex items-center gap-1 text-xs font-semibold">
+            <div className="bg-[#1E1E1E] border border-[#262626] p-0.5 rounded-lg flex items-center gap-1 text-xs font-semibold">
               <button
-                onClick={() => setViewMode('map')}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                  viewMode === 'map'
+                onClick={() => setViewMode('graph')}
+                className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
+                  viewMode === 'graph'
                     ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
                     : 'text-gray-400 hover:text-gray-200'
                 }`}
               >
-                <Map className="w-3.5 h-3.5" />
-                <span>Horizon Map</span>
+                <Network className="w-3.5 h-3.5" />
+                <span>Graph</span>
+              </button>
+              <button
+                onClick={() => setViewMode('kanban')}
+                className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
+                  viewMode === 'kanban'
+                    ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <Kanban className="w-3.5 h-3.5" />
+                <span>Kanban</span>
               </button>
               <button
                 onClick={() => setViewMode('cards')}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
                   viewMode === 'cards'
                     ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
                     : 'text-gray-400 hover:text-gray-200'
                 }`}
               >
                 <Layers className="w-3.5 h-3.5" />
-                <span>Altitude Cards</span>
+                <span>Cards</span>
               </button>
             </div>
 
             <button
               onClick={() => handleOpenAddModal(3)}
-              className="px-3.5 py-1.5 sm:px-4 sm:py-2 bg-[#C5A47E] hover:bg-[#b8946e] active:bg-[#a8845e] text-black text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-1.5 bg-[#C5A47E] hover:bg-[#b8946e] active:bg-[#a8845e] text-black text-xs font-bold rounded-lg shadow-xs transition-all flex items-center gap-1 cursor-pointer shrink-0"
             >
-              <Plus className="w-4 h-4" />
-              <span>Add Horizon Focus</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Focus</span>
             </button>
           </div>
         </div>
 
         {/* Filter Ribbons for Cards View */}
         {viewMode === 'cards' && (
-          <div className="mt-8 pt-6 border-t border-[#262626] flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+          <div className="mt-3 pt-3 border-t border-[#202020] flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
             {/* Altitude Level Selector */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-bold text-gray-500 uppercase tracking-wider text-[11px] mr-1">
@@ -208,13 +219,7 @@ export const HorizonsView: React.FC = () => {
       </div>
 
       {/* Main View Display */}
-      {viewMode === 'map' ? (
-        <HorizonsMap
-          onOpenAddModal={handleOpenAddModal}
-          onOpenEditModal={handleOpenEditModal}
-          onDeletePrompt={handleDeletePrompt}
-        />
-      ) : (
+      {viewMode === 'cards' ? (
         /* View Mode: Altitude Cards */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredItems.map((item) => {
@@ -239,12 +244,15 @@ export const HorizonsView: React.FC = () => {
                       H{item.level} • {def.altitude}
                     </span>
 
-                    {item.lifeDomain && (
-                      <span className="text-[10px] font-medium text-gray-400 flex items-center gap-1">
-                        <Tag className="w-2.5 h-2.5 text-[#C5A47E]" />
-                        <span>{item.lifeDomain}</span>
-                      </span>
-                    )}
+                    {(() => {
+                      const d = getHorizonItemDomain(item, horizonItems);
+                      return d ? (
+                        <span className="text-[10px] font-medium text-gray-400 flex items-center gap-1">
+                          <Tag className="w-2.5 h-2.5 text-[#C5A47E]" />
+                          <span>{d}</span>
+                        </span>
+                      ) : null;
+                    })()}
 
                     {item.level === 3 && parentItem && (
                       <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1 truncate max-w-[160px]" title={parentItem.title}>
@@ -317,6 +325,29 @@ export const HorizonsView: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Weekly Review Progress Rating & Notes */}
+                  {(item.progressRating || item.reviewNotes) && (
+                    <div className="pt-2 border-t border-[#262626] space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                          <Star className="w-3 h-3 text-[#C5A47E]" />
+                          <span>Review Progress:</span>
+                        </span>
+                        {item.progressRating && (
+                          <span className="px-2 py-0.5 rounded bg-amber-950/40 text-amber-300 border border-amber-800/30 text-[11px] font-mono font-bold flex items-center gap-1">
+                            <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
+                            <span>{item.progressRating}/5</span>
+                          </span>
+                        )}
+                      </div>
+                      {item.reviewNotes && (
+                        <p className="text-[11px] text-gray-300 italic bg-[#161616] p-2 rounded-lg border border-[#262626] leading-relaxed line-clamp-2">
+                          "{item.reviewNotes}"
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                 </div>
 
                 {/* Card Footer Actions */}
@@ -352,6 +383,13 @@ export const HorizonsView: React.FC = () => {
             );
           })}
         </div>
+      ) : (
+        <HorizonsMap
+          activeLayout={viewMode === 'kanban' ? 'altitude-cascade' : 'graph-view'}
+          onOpenAddModal={handleOpenAddModal}
+          onOpenEditModal={handleOpenEditModal}
+          onDeletePrompt={handleDeletePrompt}
+        />
       )}
 
       {/* Horizon Item Creation & Edit Modal */}

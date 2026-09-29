@@ -6,10 +6,23 @@ import {
   WeeklyReviewRecord, 
   ActiveTab,
   ActionType,
-  DriveSpreadsheetItem
+  DriveSpreadsheetItem,
+  SyncMode,
+  DEFAULT_SUGGESTED_TAGS
 } from '../types/gtd';
 import { getActionStreakInfo, formatDateKey } from '../utils/streakUtils';
 import { isProjectStalled } from '../utils/projectUtils';
+import {
+  generateActionsCSV,
+  generateProjectsCSV,
+  generateHorizonsCSV,
+  generateAllInOneCSV,
+  parseAndImportCSV,
+  isFileSystemAccessSupported,
+  linkLocalJsonFile,
+  writeDataToFileHandle,
+  triggerFileDownload
+} from '../utils/offlineSync';
 import { 
   INITIAL_HORIZON_ITEMS, 
   INITIAL_PROJECTS, 
@@ -74,6 +87,18 @@ interface GTDContextType {
   setAutoSyncEnabled: (enabled: boolean) => void;
   dismissSyncConflict: () => void;
 
+  // Sync Mode & Offline Sync
+  syncMode: SyncMode;
+  setSyncMode: (mode: SyncMode) => void;
+  lastOfflineSyncTime: Date | null;
+  linkedFileName: string | null;
+  isFileSystemSupported: boolean;
+  linkLocalFile: () => Promise<boolean>;
+  unlinkLocalFile: () => void;
+  syncToOfflineNow: () => Promise<void>;
+  exportCSV: (type: 'all' | 'actions' | 'projects' | 'horizons') => void;
+  importCSV: (csvText: string) => { success: boolean; message: string };
+
   // Data State
   horizonItems: HorizonItem[];
   projects: GTDProject[];
@@ -128,6 +153,7 @@ interface GTDContextType {
       type: ActionType;
       title?: string;
       projectId?: string;
+      tags?: string[];
       context?: string;
       energy?: GTDAction['energy'];
       timeEstimate?: GTDAction['timeEstimate'];
@@ -153,6 +179,7 @@ interface GTDContextType {
   importData: (jsonString: string) => boolean;
 
   // Computed Metrics
+  allTags: string[];
   stalledProjects: GTDProject[];
   nextActionsCount: number;
   inboxCount: number;
@@ -170,6 +197,24 @@ interface GTDContextType {
 
 const LOCAL_STORAGE_KEY_PREFIX = 'gtd_hub_state_v2';
 const CROSS_TAB_CHANNEL_NAME = 'gtd_cross_tab_sync_channel';
+
+export const normalizeActions = (rawActions: any[]): GTDAction[] => {
+  if (!Array.isArray(rawActions)) return [];
+  return rawActions.map((act) => {
+    let tags = act.tags;
+    if (!Array.isArray(tags)) {
+      const migrated: string[] = [];
+      if (act.context && typeof act.context === 'string') migrated.push(act.context.trim());
+      if (act.energy && typeof act.energy === 'string') migrated.push(`${act.energy}-energy`);
+      if (act.timeEstimate && typeof act.timeEstimate === 'string') migrated.push(act.timeEstimate.trim());
+      tags = migrated;
+    }
+    return {
+      ...act,
+      tags,
+    };
+  });
+};
 
 const GTDContext = createContext<GTDContextType | undefined>(undefined);
 
@@ -218,6 +263,24 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [syncConflictNotice, setSyncConflictNotice] = useState<SyncConflictNotice | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
 
+  // Sync Mode: 'cloud' | 'offline'
+  const [syncMode, setSyncModeState] = useState<SyncMode>(() => {
+    const saved = localStorage.getItem('gtd_sync_mode');
+    if (saved === 'offline' || saved === 'cloud') return saved;
+    return getStoredGoogleUser() ? 'cloud' : 'offline';
+  });
+
+  const [lastOfflineSyncTime, setLastOfflineSyncTime] = useState<Date | null>(() => {
+    const saved = localStorage.getItem('gtd_last_offline_sync_time');
+    return saved ? new Date(saved) : null;
+  });
+
+  const linkedFileHandleRef = useRef<any>(null);
+  const [linkedFileName, setLinkedFileName] = useState<string | null>(() => {
+    return localStorage.getItem('gtd_linked_file_name');
+  });
+  const isFileSystemSupported = useMemo(() => isFileSystemAccessSupported(), []);
+
   const setAutoSyncEnabled = (enabled: boolean) => {
     setAutoSyncEnabledState(enabled);
     localStorage.setItem('gtd_auto_sync_enabled', String(enabled));
@@ -258,7 +321,7 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         ? `${LOCAL_STORAGE_KEY_PREFIX}_user_${encodeURIComponent(user.email)}`
         : `${LOCAL_STORAGE_KEY_PREFIX}_guest`;
       const saved = localStorage.getItem(`${initialKey}_actions`);
-      return saved ? JSON.parse(saved) : INITIAL_ACTIONS;
+      return saved ? normalizeActions(JSON.parse(saved)) : INITIAL_ACTIONS;
     } catch {
       return INITIAL_ACTIONS;
     }
@@ -288,11 +351,130 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedHorizonId, setSelectedHorizonId] = useState<string | null>(null);
 
-  // Cross-Tab Broadcast Channel initialization
+  // Fresh state refs so async operations (cloud sync, background checks) never use stale closures
+  const horizonItemsRef = useRef(horizonItems);
+  const projectsRef = useRef(projects);
+  const actionsRef = useRef(actions);
+  const reviewsRef = useRef(reviews);
+
+  horizonItemsRef.current = horizonItems;
+  projectsRef.current = projects;
+  actionsRef.current = actions;
+  reviewsRef.current = reviews;
+
+  // Cross-Tab & Cross-Page Synchronization refs
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const isApplyingExternalUpdate = useRef<boolean>(false);
+  const lastLocalMutationTimestampRef = useRef<number>(Date.now());
+  const lastAppliedRemoteTimestampRef = useRef<number>(0);
 
+  // Helper to immediately push local state to localStorage and broadcast to other tabs/pages with zero delay
+  const syncImmediateLocalChange = useCallback(
+    (payload: {
+      horizons?: HorizonItem[];
+      projects?: GTDProject[];
+      actions?: GTDAction[];
+      reviews?: WeeklyReviewRecord[];
+    }) => {
+      try {
+        const now = Date.now();
+        lastLocalMutationTimestampRef.current = now;
+
+        if (payload.horizons) {
+          horizonItemsRef.current = payload.horizons;
+          localStorage.setItem(`${storageKey}_horizons`, JSON.stringify(payload.horizons));
+        }
+        if (payload.projects) {
+          projectsRef.current = payload.projects;
+          localStorage.setItem(`${storageKey}_projects`, JSON.stringify(payload.projects));
+        }
+        if (payload.actions) {
+          actionsRef.current = payload.actions;
+          localStorage.setItem(`${storageKey}_actions`, JSON.stringify(payload.actions));
+        }
+        if (payload.reviews) {
+          reviewsRef.current = payload.reviews;
+          localStorage.setItem(`${storageKey}_reviews`, JSON.stringify(payload.reviews));
+        }
+
+        localStorage.setItem(`${storageKey}_updated_at`, String(now));
+        // Storage event trigger for other browser tabs/windows
+        localStorage.setItem(
+          `${storageKey}_sync_event`,
+          JSON.stringify({ senderId: tabSessionId.current, timestamp: now })
+        );
+
+        // Immediate BroadcastChannel message for active tabs
+        if (broadcastChannelRef.current) {
+          broadcastChannelRef.current.postMessage({
+            type: 'DATA_UPDATE',
+            senderId: tabSessionId.current,
+            storageKey,
+            timestamp: now,
+            data: {
+              horizons: payload.horizons ?? horizonItems,
+              projects: payload.projects ?? projects,
+              actions: payload.actions ?? actions,
+              reviews: payload.reviews ?? reviews,
+              lastSyncTime: lastSyncTime?.toISOString(),
+              sheetId,
+              sheetTitle,
+              sheetUrl,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('Failed to sync immediate local change:', err);
+      }
+    },
+    [storageKey, horizonItems, projects, actions, reviews, lastSyncTime, sheetId, sheetTitle, sheetUrl]
+  );
+
+  // Reload the freshest partitioned state from localStorage
+  const loadLatestFromLocalStorage = useCallback(() => {
+    try {
+      const storedUpdatedAt = Number(localStorage.getItem(`${storageKey}_updated_at`)) || 0;
+      // Do not overwrite if we have newer pending local mutations on this tab
+      if (
+        storedUpdatedAt > 0 &&
+        storedUpdatedAt <= lastLocalMutationTimestampRef.current &&
+        storedUpdatedAt <= lastAppliedRemoteTimestampRef.current
+      ) {
+        return;
+      }
+
+      const savedH = localStorage.getItem(`${storageKey}_horizons`);
+      const savedP = localStorage.getItem(`${storageKey}_projects`);
+      const savedA = localStorage.getItem(`${storageKey}_actions`);
+      const savedR = localStorage.getItem(`${storageKey}_reviews`);
+      const savedSync = localStorage.getItem(`${storageKey}_lastSyncTime`);
+      const savedSheetId = localStorage.getItem(`${storageKey}_sheetId`);
+      const savedSheetTitle = localStorage.getItem(`${storageKey}_sheetTitle`);
+      const savedSheetUrl = localStorage.getItem(`${storageKey}_sheetUrl`);
+
+      isApplyingExternalUpdate.current = true;
+      lastAppliedRemoteTimestampRef.current = storedUpdatedAt || Date.now();
+
+      if (savedH) setHorizonItems(JSON.parse(savedH));
+      if (savedP) setProjects(JSON.parse(savedP));
+      if (savedA) setActions(JSON.parse(savedA));
+      if (savedR) setReviews(JSON.parse(savedR));
+      if (savedSync) setLastSyncTime(new Date(savedSync));
+      if (savedSheetId) setSheetId(savedSheetId);
+      if (savedSheetTitle) setSheetTitle(savedSheetTitle);
+      if (savedSheetUrl) setSheetUrl(savedSheetUrl);
+
+      setTimeout(() => {
+        isApplyingExternalUpdate.current = false;
+      }, 100);
+    } catch (e) {
+      console.warn('Error reading from localStorage cross-tab sync:', e);
+    }
+  }, [storageKey]);
+
+  // Cross-Tab BroadcastChannel + Window Storage Events + Page Focus & Visibility Listeners
   useEffect(() => {
+    // 1. BroadcastChannel setup (zero-latency message bus for active tabs)
     try {
       if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
         const channel = new BroadcastChannel(CROSS_TAB_CHANNEL_NAME);
@@ -303,7 +485,17 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           if (!msg || msg.senderId === tabSessionId.current) return;
 
           if (msg.type === 'DATA_UPDATE' && msg.storageKey === storageKey) {
+            const incomingTimestamp = msg.timestamp || Date.now();
+            if (
+              incomingTimestamp <= lastLocalMutationTimestampRef.current &&
+              lastLocalMutationTimestampRef.current > lastAppliedRemoteTimestampRef.current
+            ) {
+              return;
+            }
+
             isApplyingExternalUpdate.current = true;
+            lastAppliedRemoteTimestampRef.current = incomingTimestamp;
+
             if (msg.data.horizons) setHorizonItems(msg.data.horizons);
             if (msg.data.projects) setProjects(msg.data.projects);
             if (msg.data.actions) setActions(msg.data.actions);
@@ -315,18 +507,46 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
             setTimeout(() => {
               isApplyingExternalUpdate.current = false;
-            }, 50);
+            }, 100);
           }
-        };
-
-        return () => {
-          channel.close();
         };
       }
     } catch (e) {
       console.warn('BroadcastChannel not supported:', e);
     }
-  }, [storageKey]);
+
+    // 2. Storage event listener (fires across tabs/windows of the same domain on localStorage updates)
+    const handleStorageEvent = (event: StorageEvent) => {
+      if (!event.key || event.key.startsWith(storageKey)) {
+        if (event.key === `${storageKey}_sync_event` && event.newValue) {
+          try {
+            const parsed = JSON.parse(event.newValue);
+            if (parsed.senderId === tabSessionId.current) return;
+          } catch {}
+        }
+        loadLatestFromLocalStorage();
+      }
+    };
+    window.addEventListener('storage', handleStorageEvent);
+
+    // 3. Tab visibility change & window focus listeners (instantly sync when user switches tabs/pages)
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'hidden') return;
+      loadLatestFromLocalStorage();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      if (broadcastChannelRef.current) {
+        broadcastChannelRef.current.close();
+        broadcastChannelRef.current = null;
+      }
+      window.removeEventListener('storage', handleStorageEvent);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [storageKey, loadLatestFromLocalStorage]);
 
   // Sync state to current user's localStorage partition & broadcast to other tabs
   useEffect(() => {
@@ -349,31 +569,97 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         localStorage.setItem(`${storageKey}_sheetUrl`, sheetUrl);
       }
 
-      // Broadcast changes to any other open browser tabs
-      if (!isApplyingExternalUpdate.current && broadcastChannelRef.current) {
-        broadcastChannelRef.current.postMessage({
-          type: 'DATA_UPDATE',
-          senderId: tabSessionId.current,
-          storageKey,
-          data: {
-            horizons: horizonItems,
-            projects,
-            actions,
-            reviews,
-            lastSyncTime: lastSyncTime?.toISOString(),
-            sheetId,
-            sheetTitle,
-            sheetUrl,
-          },
-        });
+      // Broadcast changes only if this was an active local change (not triggered by remote/external sync)
+      if (
+        !isApplyingExternalUpdate.current &&
+        lastLocalMutationTimestampRef.current > lastAppliedRemoteTimestampRef.current
+      ) {
+        const now = Date.now();
+        localStorage.setItem(`${storageKey}_updated_at`, String(now));
+        localStorage.setItem(
+          `${storageKey}_sync_event`,
+          JSON.stringify({
+            senderId: tabSessionId.current,
+            timestamp: now,
+          })
+        );
+
+        if (broadcastChannelRef.current) {
+          broadcastChannelRef.current.postMessage({
+            type: 'DATA_UPDATE',
+            senderId: tabSessionId.current,
+            storageKey,
+            timestamp: now,
+            data: {
+              horizons: horizonItems,
+              projects,
+              actions,
+              reviews,
+              lastSyncTime: lastSyncTime?.toISOString(),
+              sheetId,
+              sheetTitle,
+              sheetUrl,
+            },
+          });
+        }
       }
     } catch (e) {
       console.error('Failed to save to localStorage / broadcast:', e);
     }
   }, [horizonItems, projects, actions, reviews, lastSyncTime, sheetId, sheetTitle, sheetUrl, storageKey]);
 
+  // Multi-Device Tombstone Tracking for Deletions
+  const tombstonesRef = useRef<Map<string, number>>(new Map());
+
+  const getTombstoneKey = (email?: string) => 
+    `gtd_tombstones_${email ? encodeURIComponent(email) : 'guest'}`;
+
+  const loadTombstones = useCallback((email?: string) => {
+    try {
+      const raw = localStorage.getItem(getTombstoneKey(email));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const map = new Map<string, number>();
+        const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000; // retain tombstones for 30 days
+        for (const [id, time] of Object.entries(parsed)) {
+          if (Number(time) > cutoff) {
+            map.set(id, Number(time));
+          }
+        }
+        tombstonesRef.current = map;
+        return;
+      }
+    } catch (e) {
+      console.warn('Error loading tombstones:', e);
+    }
+    tombstonesRef.current = new Map();
+  }, []);
+
+  const saveTombstones = useCallback((email?: string) => {
+    try {
+      const obj: Record<string, number> = {};
+      for (const [id, time] of tombstonesRef.current.entries()) {
+        obj[id] = time;
+      }
+      localStorage.setItem(getTombstoneKey(email), JSON.stringify(obj));
+    } catch (e) {
+      console.warn('Error saving tombstones:', e);
+    }
+  }, []);
+
+  const recordTombstone = useCallback((id: string) => {
+    tombstonesRef.current.set(id, Date.now());
+    saveTombstones(user?.email);
+  }, [user?.email, saveTombstones]);
+
+  // Load initial tombstones on mount
+  useEffect(() => {
+    loadTombstones(user?.email);
+  }, [user?.email, loadTombstones]);
+
   // Handle User Partition Switching
   const loadUserPartition = useCallback((userEmail?: string) => {
+    loadTombstones(userEmail);
     const key = userEmail 
       ? `${LOCAL_STORAGE_KEY_PREFIX}_user_${encodeURIComponent(userEmail)}`
       : `${LOCAL_STORAGE_KEY_PREFIX}_guest`;
@@ -390,7 +676,7 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       setHorizonItems(savedH ? JSON.parse(savedH) : INITIAL_HORIZON_ITEMS);
       setProjects(savedP ? JSON.parse(savedP) : INITIAL_PROJECTS);
-      setActions(savedA ? JSON.parse(savedA) : INITIAL_ACTIONS);
+      setActions(savedA ? normalizeActions(JSON.parse(savedA)) : INITIAL_ACTIONS);
       setReviews(savedR ? JSON.parse(savedR) : INITIAL_REVIEWS);
       setLastSyncTime(savedSync ? new Date(savedSync) : null);
       setSheetId(savedSheetId || null);
@@ -422,11 +708,153 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [user, sheetId]);
 
+  // Offline Sync Actions
+  const syncToOfflineNow = useCallback(async () => {
+    const now = new Date();
+    setLastOfflineSyncTime(now);
+    localStorage.setItem('gtd_last_offline_sync_time', now.toISOString());
+
+    if (linkedFileHandleRef.current) {
+      const dataPayload = {
+        version: '2.0',
+        syncedAt: now.toISOString(),
+        mode: 'offline',
+        horizonItems: horizonItemsRef.current,
+        projects: projectsRef.current,
+        actions: actionsRef.current,
+        reviews: reviewsRef.current,
+      };
+      await writeDataToFileHandle(linkedFileHandleRef.current, dataPayload);
+    }
+  }, []);
+
+  const setSyncMode = useCallback((mode: SyncMode) => {
+    setSyncModeState(mode);
+    localStorage.setItem('gtd_sync_mode', mode);
+    if (mode === 'offline') {
+      const now = new Date();
+      setLastOfflineSyncTime(now);
+      localStorage.setItem('gtd_last_offline_sync_time', now.toISOString());
+    } else if (mode === 'cloud') {
+      if (user?.accessToken && !user.isExpired) {
+        setTimeout(() => {
+          if (syncToSheetRef.current) syncToSheetRef.current();
+        }, 100);
+      }
+    }
+  }, [user]);
+
+  const linkLocalFile = useCallback(async (): Promise<boolean> => {
+    try {
+      const result = await linkLocalJsonFile();
+      if (!result) return false;
+
+      linkedFileHandleRef.current = result.handle;
+      setLinkedFileName(result.fileName);
+      localStorage.setItem('gtd_linked_file_name', result.fileName);
+
+      if (result.data && (result.data.actions || result.data.projects)) {
+        if (result.data.horizonItems) setHorizonItems(result.data.horizonItems);
+        if (result.data.projects) setProjects(result.data.projects);
+        if (result.data.actions) setActions(result.data.actions);
+        if (result.data.reviews) setReviews(result.data.reviews);
+      } else {
+        const dataPayload = {
+          version: '2.0',
+          syncedAt: new Date().toISOString(),
+          mode: 'offline',
+          horizonItems: horizonItemsRef.current,
+          projects: projectsRef.current,
+          actions: actionsRef.current,
+          reviews: reviewsRef.current,
+        };
+        await writeDataToFileHandle(result.handle, dataPayload);
+      }
+
+      const now = new Date();
+      setLastOfflineSyncTime(now);
+      localStorage.setItem('gtd_last_offline_sync_time', now.toISOString());
+      return true;
+    } catch (err) {
+      console.error('Failed to link local file:', err);
+      return false;
+    }
+  }, []);
+
+  const unlinkLocalFile = useCallback(() => {
+    linkedFileHandleRef.current = null;
+    setLinkedFileName(null);
+    localStorage.removeItem('gtd_linked_file_name');
+  }, []);
+
+  const exportCSV = useCallback((type: 'all' | 'actions' | 'projects' | 'horizons') => {
+    const dateStr = new Date().toISOString().split('T')[0];
+    const liveActions = actionsRef.current;
+    const liveProjects = projectsRef.current;
+    const liveHorizons = horizonItemsRef.current;
+    const liveReviews = reviewsRef.current;
+
+    if (type === 'actions') {
+      const csv = generateActionsCSV(liveActions, liveProjects);
+      triggerFileDownload(csv, `gtd-actions-${dateStr}.csv`, 'text/csv;charset=utf-8');
+    } else if (type === 'projects') {
+      const csv = generateProjectsCSV(liveProjects, liveHorizons);
+      triggerFileDownload(csv, `gtd-projects-${dateStr}.csv`, 'text/csv;charset=utf-8');
+    } else if (type === 'horizons') {
+      const csv = generateHorizonsCSV(liveHorizons);
+      triggerFileDownload(csv, `gtd-horizons-${dateStr}.csv`, 'text/csv;charset=utf-8');
+    } else {
+      const csv = generateAllInOneCSV(liveActions, liveProjects, liveHorizons, liveReviews);
+      triggerFileDownload(csv, `gtd-master-spreadsheet-${dateStr}.csv`, 'text/csv;charset=utf-8');
+    }
+    const now = new Date();
+    setLastOfflineSyncTime(now);
+    localStorage.setItem('gtd_last_offline_sync_time', now.toISOString());
+  }, []);
+
+  const importCSV = useCallback((csvText: string) => {
+    const result = parseAndImportCSV(csvText, projects);
+    if (!result.success) {
+      return { success: false, message: result.message };
+    }
+
+    if (result.type === 'actions' && result.importedActions) {
+      setActions((prev) => {
+        const next = [...result.importedActions!, ...prev];
+        syncImmediateLocalChange({ actions: next });
+        return next;
+      });
+      const now = new Date();
+      setLastOfflineSyncTime(now);
+      localStorage.setItem('gtd_last_offline_sync_time', now.toISOString());
+      return { success: true, message: result.message };
+    }
+
+    if (result.type === 'projects' && result.importedProjects) {
+      setProjects((prev) => {
+        const next = [...result.importedProjects!, ...prev];
+        syncImmediateLocalChange({ projects: next });
+        return next;
+      });
+      const now = new Date();
+      setLastOfflineSyncTime(now);
+      localStorage.setItem('gtd_last_offline_sync_time', now.toISOString());
+      return { success: true, message: result.message };
+    }
+
+    return { success: false, message: 'Unrecognized CSV format.' };
+  }, [projects]);
+
   // Sync to Google Sheets with Safe Multi-Device Conflict Detection
   const syncToSheetRef = useRef<(() => Promise<void>) | null>(null);
   const isSyncInProgressRef = useRef<boolean>(false);
 
   const syncNow = useCallback(async () => {
+    if (syncMode === 'offline') {
+      await syncToOfflineNow();
+      return;
+    }
+
     if (!user || !user.accessToken) {
       return;
     }
@@ -447,6 +875,7 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return;
     }
 
+    const syncStartedAt = Date.now();
     isSyncInProgressRef.current = true;
     setIsSyncing(true);
     setSyncError(null);
@@ -464,50 +893,133 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSheetTitle(sheetMeta.title);
       }
 
-      // 1. ALWAYS FETCH FROM SHEET FIRST: Retrieve latest remote state & changes since last sync
-      const remoteDataset = await fetchGTDDataFromSheet(user.accessToken, targetSheetId);
-
+      // Always read the live in-memory dataset so local changes reflect immediately
       let payloadData: {
         horizons: HorizonItem[];
         projects: GTDProject[];
         actions: GTDAction[];
         reviews: WeeklyReviewRecord[];
       } = {
-        horizons: horizonItems,
-        projects,
-        actions,
-        reviews,
+        horizons: horizonItemsRef.current,
+        projects: projectsRef.current,
+        actions: actionsRef.current,
+        reviews: reviewsRef.current,
       };
 
+      // 1. Fetch remote dataset from Google Sheet
+      const remoteDataset = await fetchGTDDataFromSheet(user.accessToken, targetSheetId);
+
       if (remoteDataset && remoteDataset.sheetExists) {
-        // 2. INTELLIGENT MERGE: Merge remote modifications with any local changes made since last sync
+        // 2. Intelligent merge of remote sheet data with local dataset
         const { merged, remoteChangesCount } = mergeGTDDatasets(
           payloadData,
           remoteDataset,
-          lastSyncTime
+          lastSyncTime,
+          tombstonesRef.current
         );
-        payloadData = merged;
 
-        // Apply merged results into local React state immediately
-        isApplyingExternalUpdate.current = true;
-        setHorizonItems(merged.horizons);
-        setProjects(merged.projects);
-        setActions(merged.actions);
-        setReviews(merged.reviews);
-        setTimeout(() => {
-          isApplyingExternalUpdate.current = false;
-        }, 100);
+        // Protect any local edits or items that were modified while network fetch was in-flight
+        const currentActions = actionsRef.current;
+        const currentProjects = projectsRef.current;
+        const currentHorizons = horizonItemsRef.current;
+        const currentReviews = reviewsRef.current;
 
+        const resolvedActions = merged.actions.map((m) => {
+          const localMatch = currentActions.find((c) => c.id === m.id);
+          if (localMatch) {
+            const localTime = Math.max(
+              new Date(localMatch.updatedAt || 0).getTime(),
+              new Date(localMatch.completedAt || 0).getTime()
+            );
+            if (localTime >= syncStartedAt) {
+              return localMatch;
+            }
+          }
+          return m;
+        });
+        for (const c of currentActions) {
+          if (!resolvedActions.some((r) => r.id === c.id)) {
+            resolvedActions.push(c);
+          }
+        }
+
+        const resolvedProjects = merged.projects.map((m) => {
+          const localMatch = currentProjects.find((c) => c.id === m.id);
+          if (localMatch) {
+            const localTime = Math.max(
+              new Date(localMatch.updatedAt || 0).getTime(),
+              new Date(localMatch.completedAt || 0).getTime()
+            );
+            if (localTime >= syncStartedAt) {
+              return localMatch;
+            }
+          }
+          return m;
+        });
+        for (const c of currentProjects) {
+          if (!resolvedProjects.some((r) => r.id === c.id)) {
+            resolvedProjects.push(c);
+          }
+        }
+
+        const resolvedHorizons = merged.horizons.map((m) => {
+          const localMatch = currentHorizons.find((c) => c.id === m.id);
+          if (localMatch) {
+            const localTime = Math.max(
+              new Date(localMatch.updatedAt || 0).getTime(),
+              new Date(localMatch.lastReviewedAt || 0).getTime()
+            );
+            if (localTime >= syncStartedAt) {
+              return localMatch;
+            }
+          }
+          return m;
+        });
+        for (const c of currentHorizons) {
+          if (!resolvedHorizons.some((r) => r.id === c.id)) {
+            resolvedHorizons.push(c);
+          }
+        }
+
+        const resolvedReviews = merged.reviews.slice();
+        for (const c of currentReviews) {
+          if (!resolvedReviews.some((r) => r.id === c.id)) {
+            resolvedReviews.push(c);
+          }
+        }
+
+        payloadData = {
+          horizons: resolvedHorizons,
+          projects: resolvedProjects,
+          actions: resolvedActions,
+          reviews: resolvedReviews,
+        };
+
+        // If remote had updates from other devices, update local state safely without clobbering local changes
         if (remoteChangesCount > 0) {
+          isApplyingExternalUpdate.current = true;
+          horizonItemsRef.current = resolvedHorizons;
+          projectsRef.current = resolvedProjects;
+          actionsRef.current = resolvedActions;
+          reviewsRef.current = resolvedReviews;
+
+          setHorizonItems(resolvedHorizons);
+          setProjects(resolvedProjects);
+          setActions(resolvedActions);
+          setReviews(resolvedReviews);
+          setTimeout(() => {
+            isApplyingExternalUpdate.current = false;
+          }, 100);
+
           setSyncConflictNotice({
-            message: `Fetched and integrated ${remoteChangesCount} change${remoteChangesCount > 1 ? 's' : ''} from Google Sheet.`,
+            message: `Fetched and integrated ${remoteChangesCount} update${remoteChangesCount > 1 ? 's' : ''} from Google Sheet.`,
             remoteTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             changesCount: remoteChangesCount,
           });
         }
       }
 
-      // 3. ONLY THEN WRITE TO THE SHEET: Save the unified merged dataset
+      // 3. Write unified data to the sheet in the background
       const res = await saveGTDDataToSheet(
         user.accessToken, 
         targetSheetId, 
@@ -519,6 +1031,16 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setLastSyncTime(new Date(res.syncedAt));
       setSheetUrl(res.spreadsheetUrl);
       setSyncError(null);
+
+      // If user performed further local changes while sync was processing, queue next background sync
+      if (lastLocalMutationTimestampRef.current > syncStartedAt) {
+        if (debounceTimer.current) clearTimeout(debounceTimer.current);
+        debounceTimer.current = setTimeout(() => {
+          if (syncToSheetRef.current && !isSyncInProgressRef.current) {
+            syncToSheetRef.current();
+          }
+        }, 2500);
+      }
     } catch (err: any) {
       console.error('Google Sheets Sync failed:', err);
       const isAuthProblem =
@@ -560,6 +1082,18 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return;
     }
 
+    if (syncMode === 'offline') {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+      debounceTimer.current = setTimeout(() => {
+        syncToOfflineNow();
+      }, 1500);
+      return () => {
+        if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      };
+    }
+
     if (!autoSyncEnabled) return;
     if (!user?.accessToken || user?.isExpired || !isTokenValid(user)) return;
     if (isApplyingExternalUpdate.current || isSyncInProgressRef.current) return;
@@ -577,7 +1111,102 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
-  }, [horizonItems, projects, actions, reviews, user?.accessToken, user?.isExpired, autoSyncEnabled]);
+  }, [horizonItems, projects, actions, reviews, user?.accessToken, user?.isExpired, autoSyncEnabled, syncMode, syncToOfflineNow]);
+
+  // Startup Sync: When a signed-in user opens or returns to the app, pull changes from Google Sheet
+  const hasPerformedStartupSync = useRef<boolean>(false);
+  useEffect(() => {
+    if (hasPerformedStartupSync.current) return;
+    if (syncMode === 'offline') return;
+    if (!user?.accessToken || user?.isExpired || !isTokenValid(user)) return;
+
+    hasPerformedStartupSync.current = true;
+    const timer = setTimeout(() => {
+      if (syncToSheetRef.current && !isSyncInProgressRef.current) {
+        syncToSheetRef.current();
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [user?.email, user?.accessToken, user?.isExpired, syncMode]);
+
+  // Multi-Device Background Sync Listeners:
+  // 1. Regular periodic check (every 45s) using lightweight metadata check
+  // 2. Full periodic sync fallback every 3 minutes
+  // 3. Immediate check when window or tab gains focus / becomes visible
+  // 4. Immediate check when device reconnects to network
+  useEffect(() => {
+    if (syncMode === 'offline') return;
+    if (!autoSyncEnabled) return;
+    if (!user?.accessToken || user?.isExpired || !isTokenValid(user)) return;
+
+    // Periodic check (every 45 seconds) using lightweight metadata
+    const checkInterval = setInterval(async () => {
+      if (isSyncInProgressRef.current) return;
+      if (!user?.accessToken || user?.isExpired || !isTokenValid(user)) return;
+
+      try {
+        const targetSheetId = sheetId;
+        if (targetSheetId) {
+          const meta = await checkRemoteSheetMetadata(user.accessToken, targetSheetId);
+          if (meta && meta.lastSyncedAt) {
+            const remoteTime = new Date(meta.lastSyncedAt).getTime();
+            const localTime = lastSyncTime ? new Date(lastSyncTime).getTime() : 0;
+            // If remote sheet was synced from another device more recently than this device's last sync
+            if (remoteTime > localTime) {
+              if (syncToSheetRef.current && !isSyncInProgressRef.current) {
+                await syncToSheetRef.current();
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Periodic sheet check notice:', e);
+      }
+    }, 45000);
+
+    // Full periodic sync fallback every 3 minutes (catches external edits even if Meta was unchanged)
+    const fullFallbackInterval = setInterval(() => {
+      if (syncToSheetRef.current && !isSyncInProgressRef.current) {
+        syncToSheetRef.current();
+      }
+    }, 180000);
+
+    // Window focus / visibility change handler: sync when returning to the tab
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'hidden') return;
+      if (!user?.accessToken || user?.isExpired || !isTokenValid(user)) return;
+      if (isSyncInProgressRef.current) return;
+
+      const now = Date.now();
+      const lastSync = lastSyncTime ? new Date(lastSyncTime).getTime() : 0;
+      // If at least 15 seconds have elapsed since last sync, pull new changes
+      if (now - lastSync > 15000) {
+        if (syncToSheetRef.current && !isSyncInProgressRef.current) {
+          syncToSheetRef.current();
+        }
+      }
+    };
+
+    // Online event handler: sync as soon as network returns
+    const handleOnline = () => {
+      if (syncToSheetRef.current && !isSyncInProgressRef.current) {
+        syncToSheetRef.current();
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      clearInterval(checkInterval);
+      clearInterval(fullFallbackInterval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [user?.accessToken, user?.isExpired, sheetId, lastSyncTime, autoSyncEnabled, syncMode]);
 
   // Switch Active Spreadsheet
   const switchSpreadsheet = useCallback(async (newSheetId: string, customTitle?: string) => {
@@ -608,10 +1237,10 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       } else {
         // Virgin sheet, save current dataset into it
         await saveGTDDataToSheet(user.accessToken, newSheetId, user.email, {
-          horizons: horizonItems,
-          projects,
-          actions,
-          reviews,
+          horizons: horizonItemsRef.current,
+          projects: projectsRef.current,
+          actions: actionsRef.current,
+          reviews: reviewsRef.current,
         }, chosenTitle);
         setLastSyncTime(new Date());
       }
@@ -623,7 +1252,7 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     } finally {
       setIsSyncing(false);
     }
-  }, [user, horizonItems, projects, actions, reviews, refreshAvailableSheets]);
+  }, [user, refreshAvailableSheets]);
 
   // Create a brand new named Google Spreadsheet
   const createNewSpreadsheet = useCallback(async (title: string) => {
@@ -638,12 +1267,12 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setSheetTitle(created.title);
       setSheetUrl(created.spreadsheetUrl);
 
-      // Seed newly created sheet with current data
+      // Seed newly created sheet with current live data
       await saveGTDDataToSheet(user.accessToken, created.spreadsheetId, user.email, {
-        horizons: horizonItems,
-        projects,
-        actions,
-        reviews,
+        horizons: horizonItemsRef.current,
+        projects: projectsRef.current,
+        actions: actionsRef.current,
+        reviews: reviewsRef.current,
       }, created.title);
 
       setLastSyncTime(new Date());
@@ -654,7 +1283,7 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     } finally {
       setIsSyncing(false);
     }
-  }, [user, horizonItems, projects, actions, reviews, refreshAvailableSheets]);
+  }, [user, refreshAvailableSheets]);
 
   // Connect to an existing spreadsheet by URL or ID
   const connectExistingSpreadsheet = useCallback(async (urlOrId: string) => {
@@ -689,18 +1318,39 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       const sheetData = await fetchGTDDataFromSheet(user.accessToken, targetSheetId);
       if (sheetData) {
-        if (sheetData.horizons && sheetData.horizons.length > 0) setHorizonItems(sheetData.horizons);
-        if (sheetData.projects && sheetData.projects.length > 0) setProjects(sheetData.projects);
-        if (sheetData.actions && sheetData.actions.length > 0) setActions(sheetData.actions);
-        if (sheetData.reviews && sheetData.reviews.length > 0) setReviews(sheetData.reviews);
-        if (sheetData.lastSyncedAt) setLastSyncTime(new Date(sheetData.lastSyncedAt));
+        const payloadData = {
+          horizons: horizonItemsRef.current,
+          projects: projectsRef.current,
+          actions: actionsRef.current,
+          reviews: reviewsRef.current,
+        };
+        const { merged } = mergeGTDDatasets(
+          payloadData,
+          sheetData,
+          lastSyncTime,
+          tombstonesRef.current
+        );
+        isApplyingExternalUpdate.current = true;
+        setHorizonItems(merged.horizons);
+        setProjects(merged.projects);
+        setActions(merged.actions);
+        setReviews(merged.reviews);
+        setTimeout(() => {
+          isApplyingExternalUpdate.current = false;
+        }, 100);
+
+        if (sheetData.lastSyncedAt) {
+          setLastSyncTime(new Date(sheetData.lastSyncedAt));
+        } else {
+          setLastSyncTime(new Date());
+        }
       } else {
         // Sheet is virgin, seed it with current user data
         await saveGTDDataToSheet(user.accessToken, targetSheetId, user.email, {
-          horizons: horizonItems,
-          projects,
-          actions,
-          reviews,
+          horizons: horizonItemsRef.current,
+          projects: projectsRef.current,
+          actions: actionsRef.current,
+          reviews: reviewsRef.current,
         }, targetSheetTitle || DEFAULT_SPREADSHEET_TITLE);
         setLastSyncTime(new Date());
       }
@@ -754,10 +1404,11 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         reloadFromSheet();
       }, 100);
     } catch (err: any) {
-      console.error('Sign-in error:', err);
       if (err?.isCancellation) {
-        setAuthError('Google sign-in popup was closed before completion. Please try again when ready.');
+        console.info('Google sign-in popup was dismissed by user.');
+        setAuthError('Sign-in cancelled. Click to try again when you are ready.');
       } else {
+        console.error('Sign-in error:', err);
         setAuthError(err.message || 'Unable to sign in with Google');
       }
     } finally {
@@ -795,26 +1446,37 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updatedAt: now,
       status: item.status || 'active',
     };
-    setHorizonItems((prev) => [newItem, ...prev]);
+    setHorizonItems((prev) => {
+      const next = [newItem, ...prev];
+      syncImmediateLocalChange({ horizons: next });
+      return next;
+    });
     return id;
   };
 
   const updateHorizonItem = (id: string, updates: Partial<HorizonItem>) => {
-    setHorizonItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...updates, updatedAt: new Date().toISOString() } : item))
-    );
+    setHorizonItems((prev) => {
+      const next = prev.map((item) =>
+        item.id === id ? { ...item, ...updates, updatedAt: new Date().toISOString() } : item
+      );
+      syncImmediateLocalChange({ horizons: next });
+      return next;
+    });
   };
 
   const deleteHorizonItem = (id: string) => {
+    recordTombstone(id);
+    let nextHorizons: HorizonItem[] = [];
     setHorizonItems((prev) => {
       // Also unlink child horizon items that pointed to this id
-      return prev
+      nextHorizons = prev
         .filter((item) => item.id !== id)
         .map((item) => (item.parentId === id ? { ...item, parentId: undefined, updatedAt: new Date().toISOString() } : item));
+      return nextHorizons;
     });
     // Also unlink projects that were linked to this horizon goal/area
-    setProjects((prev) =>
-      prev.map((p) => {
+    setProjects((prev) => {
+      const nextProjects = prev.map((p) => {
         if (p.goalId === id || p.areaId === id) {
           return {
             ...p,
@@ -824,8 +1486,10 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           };
         }
         return p;
-      })
-    );
+      });
+      syncImmediateLocalChange({ horizons: nextHorizons, projects: nextProjects });
+      return nextProjects;
+    });
   };
 
   // Project Actions
@@ -837,33 +1501,46 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       id,
       createdAt: now.split('T')[0],
       updatedAt: now,
+      status: project.status || 'active',
+      priority: project.priority || 'medium',
     };
-    setProjects((prev) => [newProject, ...prev]);
 
+    let nextActionsSnapshot: GTDAction[] | undefined;
     if (initialActionTitle && initialActionTitle.trim()) {
       const newAction: GTDAction = {
         id: `act-${Date.now()}`,
         title: initialActionTitle.trim(),
         projectId: id,
-        context: '@computer',
-        energy: 'medium',
-        timeEstimate: '15-30m',
+        tags: [],
         type: 'action',
         completed: false,
         priority: project.priority || 'medium',
         createdAt: now.split('T')[0],
         updatedAt: now,
       };
-      setActions((prev) => [newAction, ...prev]);
+      setActions((prev) => {
+        const next = [newAction, ...prev];
+        nextActionsSnapshot = next;
+        return next;
+      });
     }
+
+    setProjects((prev) => {
+      const next = [newProject, ...prev];
+      syncImmediateLocalChange({
+        projects: next,
+        ...(nextActionsSnapshot ? { actions: nextActionsSnapshot } : {}),
+      });
+      return next;
+    });
 
     return id;
   };
 
   const updateProject = (id: string, updates: Partial<GTDProject>) => {
     const now = new Date().toISOString();
-    setProjects((prev) =>
-      prev.map((proj) => {
+    setProjects((prev) => {
+      const next = prev.map((proj) => {
         if (proj.id === id) {
           const updated = { ...proj, ...updates, updatedAt: now };
           if (updates.status === 'completed' && proj.status !== 'completed') {
@@ -872,28 +1549,45 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           return updated;
         }
         return proj;
-      })
-    );
+      });
+      syncImmediateLocalChange({ projects: next });
+      return next;
+    });
   };
 
   const deleteProject = (id: string) => {
-    setProjects((prev) => prev.filter((proj) => proj.id !== id));
+    recordTombstone(id);
+    let nextProjects: GTDProject[] = [];
+    setProjects((prev) => {
+      nextProjects = prev.filter((proj) => proj.id !== id);
+      return nextProjects;
+    });
     // Also unlink actions attached to this project (or keep them as standalone next actions)
-    setActions((prev) =>
-      prev.map((act) =>
+    setActions((prev) => {
+      const nextActions = prev.map((act) =>
         act.projectId === id ? { ...act, projectId: undefined, updatedAt: new Date().toISOString() } : act
-      )
-    );
+      );
+      syncImmediateLocalChange({ projects: nextProjects, actions: nextActions });
+      return nextActions;
+    });
   };
 
   const restoreProject = (project: GTDProject, linkedActionIds: string[] = []) => {
-    setProjects((prev) => [project, ...prev.filter((p) => p.id !== project.id)]);
+    let nextProjects: GTDProject[] = [];
+    setProjects((prev) => {
+      nextProjects = [project, ...prev.filter((p) => p.id !== project.id)];
+      return nextProjects;
+    });
     if (linkedActionIds.length > 0) {
-      setActions((prev) =>
-        prev.map((act) =>
+      setActions((prev) => {
+        const nextActions = prev.map((act) =>
           linkedActionIds.includes(act.id) ? { ...act, projectId: project.id, updatedAt: new Date().toISOString() } : act
-        )
-      );
+        );
+        syncImmediateLocalChange({ projects: nextProjects, actions: nextActions });
+        return nextActions;
+      });
+    } else {
+      syncImmediateLocalChange({ projects: nextProjects });
     }
   };
 
@@ -907,19 +1601,24 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const now = new Date().toISOString();
     const newAction: GTDAction = {
       ...action,
+      tags: action.tags || [],
       id,
       completed: false,
       createdAt: now.split('T')[0],
       updatedAt: now,
     };
-    setActions((prev) => [newAction, ...prev]);
+    setActions((prev) => {
+      const next = [newAction, ...prev];
+      syncImmediateLocalChange({ actions: next });
+      return next;
+    });
     return id;
   };
 
   const updateAction = (id: string, updates: Partial<GTDAction>) => {
     const now = new Date().toISOString();
-    setActions((prev) =>
-      prev.map((act) => {
+    setActions((prev) => {
+      const next = prev.map((act) => {
         if (act.id === id) {
           const updated = { ...act, ...updates, updatedAt: now };
           if (updates.completed === true && !act.completed) {
@@ -930,20 +1629,27 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           return updated;
         }
         return act;
-      })
-    );
+      });
+      syncImmediateLocalChange({ actions: next });
+      return next;
+    });
   };
 
   const deleteAction = (id: string) => {
-    setActions((prev) => prev.filter((act) => act.id !== id));
+    recordTombstone(id);
+    setActions((prev) => {
+      const next = prev.filter((act) => act.id !== id);
+      syncImmediateLocalChange({ actions: next });
+      return next;
+    });
   };
 
   const toggleActionComplete = (id: string) => {
     const now = new Date().toISOString();
     const todayStr = formatDateKey(new Date());
 
-    setActions((prev) =>
-      prev.map((act) => {
+    setActions((prev) => {
+      const next = prev.map((act) => {
         if (act.id === id) {
           if (act.isRecurring && act.recurrence) {
             const currentHistory = act.completionHistory || [];
@@ -973,16 +1679,18 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           };
         }
         return act;
-      })
-    );
+      });
+      syncImmediateLocalChange({ actions: next });
+      return next;
+    });
   };
 
   const logRecurringCompletion = (id: string, dateStr?: string) => {
     const now = new Date().toISOString();
     const targetDateStr = dateStr || formatDateKey(new Date());
 
-    setActions((prev) =>
-      prev.map((act) => {
+    setActions((prev) => {
+      const next = prev.map((act) => {
         if (act.id === id && act.isRecurring && act.recurrence) {
           const currentHistory = act.completionHistory || [];
           const isDone = currentHistory.includes(targetDateStr);
@@ -1002,8 +1710,10 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           };
         }
         return act;
-      })
-    );
+      });
+      syncImmediateLocalChange({ actions: next });
+      return next;
+    });
   };
 
   const convertInboxItem = (
@@ -1012,6 +1722,7 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       type: ActionType;
       title?: string;
       projectId?: string;
+      tags?: string[];
       context?: string;
       energy?: GTDAction['energy'];
       timeEstimate?: GTDAction['timeEstimate'];
@@ -1040,14 +1751,15 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     const now = new Date().toISOString();
-    setActions((prev) =>
-      prev.map((act) => {
+    setActions((prev) => {
+      const next = prev.map((act) => {
         if (act.id === inboxId) {
           return {
             ...act,
             type: conversion.type,
             title: conversion.title || act.title,
             projectId: targetProjectId,
+            tags: conversion.tags !== undefined ? conversion.tags : act.tags,
             context: conversion.context || act.context,
             energy: conversion.energy || act.energy,
             timeEstimate: conversion.timeEstimate || act.timeEstimate,
@@ -1058,8 +1770,10 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           };
         }
         return act;
-      })
-    );
+      });
+      syncImmediateLocalChange({ actions: next });
+      return next;
+    });
   };
 
   // Review Actions
@@ -1069,11 +1783,20 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       ...record,
       id,
     };
-    setReviews((prev) => [newRecord, ...prev]);
+    setReviews((prev) => {
+      const next = [newRecord, ...prev];
+      syncImmediateLocalChange({ reviews: next });
+      return next;
+    });
   };
 
   const deleteReview = (id: string) => {
-    setReviews((prev) => prev.filter((r) => r.id !== id));
+    recordTombstone(id);
+    setReviews((prev) => {
+      const next = prev.filter((r) => r.id !== id);
+      syncImmediateLocalChange({ reviews: next });
+      return next;
+    });
   };
 
   // Reset to defaults
@@ -1086,6 +1809,12 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     localStorage.removeItem(`${storageKey}_projects`);
     localStorage.removeItem(`${storageKey}_actions`);
     localStorage.removeItem(`${storageKey}_reviews`);
+    syncImmediateLocalChange({
+      horizons: INITIAL_HORIZON_ITEMS,
+      projects: INITIAL_PROJECTS,
+      actions: INITIAL_ACTIONS,
+      reviews: INITIAL_REVIEWS,
+    });
   };
 
   // Export Data
@@ -1113,10 +1842,17 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       const parsed = JSON.parse(jsonString);
       if (parsed.horizonItems && parsed.projects && parsed.actions) {
+        const nextActions = normalizeActions(parsed.actions);
         setHorizonItems(parsed.horizonItems);
         setProjects(parsed.projects);
-        setActions(parsed.actions);
+        setActions(nextActions);
         if (parsed.reviews) setReviews(parsed.reviews);
+        syncImmediateLocalChange({
+          horizons: parsed.horizonItems,
+          projects: parsed.projects,
+          actions: nextActions,
+          reviews: parsed.reviews || reviews,
+        });
         return true;
       }
       return false;
@@ -1124,6 +1860,18 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return false;
     }
   };
+
+  // All Unique Tags across actions and suggestions
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    actions.forEach((a) => {
+      a.tags?.forEach((t) => {
+        if (t && t.trim()) set.add(t.trim());
+      });
+    });
+    DEFAULT_SUGGESTED_TAGS.forEach((t) => set.add(t));
+    return Array.from(set);
+  }, [actions]);
 
   // Metrics and Computed values
   const getProjectActions = (projectId: string) => {
@@ -1203,6 +1951,16 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         connectExistingSpreadsheet,
         setAutoSyncEnabled,
         dismissSyncConflict,
+        syncMode,
+        setSyncMode,
+        lastOfflineSyncTime,
+        linkedFileName,
+        isFileSystemSupported,
+        linkLocalFile,
+        unlinkLocalFile,
+        syncToOfflineNow,
+        exportCSV,
+        importCSV,
         horizonItems,
         projects,
         actions,
@@ -1248,6 +2006,7 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         resetToDefaults,
         exportData,
         importData,
+        allTags,
         stalledProjects,
         nextActionsCount,
         inboxCount,

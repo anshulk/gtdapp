@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Inbox, CheckCircle2, Briefcase, Clock, Sparkles, Zap, RotateCcw, Flame } from 'lucide-react';
 import { useGTD } from '../context/GTDContext';
-import { GTDContext, EnergyLevel, TimeEstimate, ActionType, RecurrencePeriod } from '../types/gtd';
-import { GTD_CONTEXT_OPTIONS } from '../data/gtdData';
+import { ActionType, RecurrencePeriod } from '../types/gtd';
 import { formatRecurrenceLabel } from '../utils/streakUtils';
+import { HorizonMappingSelector } from './HorizonMappingSelector';
+import { TagInput } from './TagInput';
 
 export const QuickCaptureModal: React.FC = () => {
   const {
@@ -13,6 +14,7 @@ export const QuickCaptureModal: React.FC = () => {
     addProject,
     projects,
     horizonItems,
+    allTags = [],
   } = useGTD();
 
   const [captureType, setCaptureType] = useState<ActionType | 'project'>('inbox');
@@ -20,9 +22,7 @@ export const QuickCaptureModal: React.FC = () => {
   const [notes, setNotes] = useState('');
   
   // Action specific fields
-  const [context, setContext] = useState<GTDContext>('@computer');
-  const [energy, setEnergy] = useState<EnergyLevel>('medium');
-  const [timeEstimate, setTimeEstimate] = useState<TimeEstimate>('15-30m');
+  const [tags, setTags] = useState<string[]>([]);
   const [projectId, setProjectId] = useState<string>('');
   const [isRecurring, setIsRecurring] = useState<boolean>(false);
   const [recurrenceCount, setRecurrenceCount] = useState<number>(3);
@@ -42,11 +42,14 @@ export const QuickCaptureModal: React.FC = () => {
     if (quickCaptureOpen) {
       setTitle('');
       setNotes('');
+      setTags([]);
       setDesiredOutcome('');
       setInitialNextAction('');
       setDelegatedTo('');
       setFollowUpDate('');
       setIsRecurring(false);
+      setAreaId('');
+      setGoalId('');
     }
   }, [quickCaptureOpen]);
 
@@ -97,9 +100,7 @@ export const QuickCaptureModal: React.FC = () => {
       addAction({
         title: title.trim(),
         projectId: projectId || undefined,
-        context: captureType === 'action' ? context : '@computer',
-        energy: captureType === 'action' ? energy : 'medium',
-        timeEstimate: captureType === 'action' ? timeEstimate : '15-30m',
+        tags: captureType === 'action' ? tags : undefined,
         type: captureType,
         isRecurring: captureType === 'action' ? isRecurring : false,
         recurrence:
@@ -247,58 +248,16 @@ export const QuickCaptureModal: React.FC = () => {
             />
           </div>
 
-          {/* Action Context, Energy, Time */}
+          {/* Action Tags */}
           {captureType === 'action' && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
-                  Context
-                </label>
-                <select
-                  value={context}
-                  onChange={(e) => setContext(e.target.value as GTDContext)}
-                  className="w-full px-2.5 py-2 text-xs bg-[#191919] border border-[#262626] rounded-xl font-mono text-gray-200 focus:border-[#C5A47E] focus:outline-hidden"
-                >
-                  {GTD_CONTEXT_OPTIONS.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
-                  Energy
-                </label>
-                <select
-                  value={energy}
-                  onChange={(e) => setEnergy(e.target.value as EnergyLevel)}
-                  className="w-full px-2.5 py-2 text-xs bg-[#191919] border border-[#262626] rounded-xl text-gray-200 focus:border-[#C5A47E] focus:outline-hidden"
-                >
-                  <option value="low">Low Energy</option>
-                  <option value="medium">Medium Energy</option>
-                  <option value="high">High Energy</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
-                  Time
-                </label>
-                <select
-                  value={timeEstimate}
-                  onChange={(e) => setTimeEstimate(e.target.value as TimeEstimate)}
-                  className="w-full px-2.5 py-2 text-xs bg-[#191919] border border-[#262626] rounded-xl text-gray-200 focus:border-[#C5A47E] focus:outline-hidden"
-                >
-                  <option value="<15m">&lt;15 mins</option>
-                  <option value="15-30m">15-30 mins</option>
-                  <option value="30-60m">30-60 mins</option>
-                  <option value="1-2h">1-2 hrs</option>
-                  <option value="2h+">2h+</option>
-                </select>
-              </div>
-            </div>
+            <TagInput
+              tags={tags}
+              onChange={setTags}
+              suggestedTags={allTags}
+              label="Action Tags (Optional)"
+              placeholder="Add tags (e.g. @computer, urgent, deep-work)..."
+              helpText="Optional: Add multiple tags to organize your actions by location, tool, or priority"
+            />
           )}
 
           {/* Project Link & Recurring Options for Actions */}
@@ -387,32 +346,51 @@ export const QuickCaptureModal: React.FC = () => {
 
           {/* Project Specific Fields */}
           {captureType === 'project' && (
-            <div className="space-y-3 bg-[#191919] p-3.5 rounded-2xl border border-[#262626]">
-              <div>
-                <label className="block text-xs font-bold text-[#C5A47E] uppercase tracking-wider mb-1">
-                  Desired Outcome (Definition of Done) *
-                </label>
-                <textarea
-                  rows={2}
-                  value={desiredOutcome}
-                  onChange={(e) => setDesiredOutcome(e.target.value)}
-                  placeholder="What does finished look like in physical reality?"
-                  className="w-full px-3 py-1.5 text-xs bg-[#141414] border border-[#262626] rounded-xl text-gray-200 placeholder-gray-500 focus:border-[#C5A47E] focus:outline-hidden"
-                />
+            <div className="space-y-3">
+              <div className="space-y-3 bg-[#191919] p-3.5 rounded-2xl border border-[#262626]">
+                <div>
+                  <label className="block text-xs font-bold text-[#C5A47E] uppercase tracking-wider mb-1">
+                    Desired Outcome (Definition of Done) *
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={desiredOutcome}
+                    onChange={(e) => setDesiredOutcome(e.target.value)}
+                    placeholder="What does finished look like in physical reality?"
+                    className="w-full px-3 py-1.5 text-xs bg-[#141414] border border-[#262626] rounded-xl text-gray-200 placeholder-gray-500 focus:border-[#C5A47E] focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#C5A47E] uppercase tracking-wider mb-1">
+                    First Next Action (Prevents Stalls)
+                  </label>
+                  <input
+                    type="text"
+                    value={initialNextAction}
+                    onChange={(e) => setInitialNextAction(e.target.value)}
+                    placeholder="Very first physical action you can take right now..."
+                    className="w-full px-3 py-1.5 text-xs bg-[#141414] border border-[#262626] rounded-xl text-gray-200 placeholder-gray-500 focus:border-[#C5A47E] focus:outline-hidden"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-[#C5A47E] uppercase tracking-wider mb-1">
-                  First Next Action (Prevents Stalls)
-                </label>
-                <input
-                  type="text"
-                  value={initialNextAction}
-                  onChange={(e) => setInitialNextAction(e.target.value)}
-                  placeholder="Very first physical action you can take right now..."
-                  className="w-full px-3 py-1.5 text-xs bg-[#141414] border border-[#262626] rounded-xl text-gray-200 placeholder-gray-500 focus:border-[#C5A47E] focus:outline-hidden"
-                />
-              </div>
+              {/* H3 / H2 Mapping Selector */}
+              <HorizonMappingSelector
+                selectedGoalId={goalId}
+                selectedAreaId={areaId}
+                projectTitle={title}
+                compact
+                onGoalChange={(newGoalId, autoAreaId) => {
+                  setGoalId(newGoalId);
+                  if (autoAreaId) {
+                    setAreaId(autoAreaId);
+                  }
+                }}
+                onAreaChange={(newAreaId) => {
+                  setAreaId(newAreaId);
+                }}
+              />
             </div>
           )}
 

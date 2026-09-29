@@ -30,11 +30,13 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
-  Check
+  Check,
+  GitBranch
 } from 'lucide-react';
 import { useGTD } from '../context/GTDContext';
 import { HORIZON_DEFINITIONS, LIFE_DOMAINS } from '../data/gtdData';
 import { HorizonLevel, HorizonItem, GTDProject, GTDAction } from '../types/gtd';
+import { getHorizonItemDomain, getProjectInheritedDomain } from '../utils/domainHierarchy';
 import { ProjectModal } from './ProjectModal';
 import { ActionEditModal } from './ActionEditModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -43,12 +45,14 @@ interface HorizonsMapProps {
   onOpenAddModal: (level: HorizonLevel, parentId?: string) => void;
   onOpenEditModal: (item: HorizonItem) => void;
   onDeletePrompt: (item: HorizonItem) => void;
+  activeLayout?: 'graph-view' | 'altitude-cascade';
 }
 
 export const HorizonsMap: React.FC<HorizonsMapProps> = ({
   onOpenAddModal,
   onOpenEditModal,
   onDeletePrompt,
+  activeLayout = 'graph-view',
 }) => {
   const {
     horizonItems = [],
@@ -63,7 +67,13 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
   } = useGTD();
 
   // Layout switcher: Graph View (Central H5 Node Tree Graph) vs Linear Cascade
-  const [mapLayout, setMapLayout] = useState<'graph-view' | 'altitude-cascade'>('graph-view');
+  const [mapLayout, setMapLayout] = useState<'graph-view' | 'altitude-cascade'>(activeLayout);
+
+  useEffect(() => {
+    if (activeLayout) {
+      setMapLayout(activeLayout);
+    }
+  }, [activeLayout]);
 
   // Filters & State
   const [selectedDomain, setSelectedDomain] = useState<string>('all');
@@ -80,6 +90,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
 
   const [hoveredCascadeItemId, setHoveredCascadeItemId] = useState<string | null>(null);
   const [mobileCascadeTab, setMobileCascadeTab] = useState<'all' | 'h5-h4' | 'h2' | 'h3' | 'projects'>('all');
+  const [cascadeSortByParent, setCascadeSortByParent] = useState<boolean>(true);
   const cascadeContainerRef = useRef<HTMLDivElement>(null);
 
   const handleCascadeItemClick = (id: string, type: 'h5' | 'h4' | 'h2' | 'h3' | 'project') => {
@@ -182,11 +193,11 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
         // Find daughter H2 Areas linked to this H4 Vision
         const daughterH2s = h2Areas.filter((h2) => {
           if (h2.parentId === h4.id) return true;
-          if (h2.parentId === h5.id && h2.lifeDomain === h4.lifeDomain) return true;
-          if (!h2.parentId && h2.lifeDomain === h4.lifeDomain) return true;
+          if (!h2.parentId && getHorizonItemDomain(h2, horizonItems) === h4.lifeDomain) return true;
           return false;
         }).filter((h2) => {
-          if (selectedDomain !== 'all' && h2.lifeDomain !== selectedDomain) return false;
+          const h2Domain = getHorizonItemDomain(h2, horizonItems);
+          if (selectedDomain !== 'all' && h2Domain !== selectedDomain) return false;
           return true;
         });
 
@@ -195,8 +206,11 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
           // Daughter H3 Goals under this H2 Area
           const daughterH3Goals = h3Goals.filter((g) => {
             if (g.parentId === h2.id) return true;
-            if (!g.parentId && g.lifeDomain === h2.lifeDomain) return true;
             return false;
+          }).filter((g) => {
+            const gDomain = getHorizonItemDomain(g, horizonItems);
+            if (selectedDomain !== 'all' && gDomain !== selectedDomain) return false;
+            return true;
           });
 
           // Build H3 Goal branches with their daughter Projects & Actions
@@ -278,12 +292,160 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
       title: quickActionInput.title.trim(),
       type: 'action',
       projectId,
-      context: '@computer',
-      energy: 'medium',
-      timeEstimate: '15-30m',
+      priority: 'medium',
     });
 
     setQuickActionInput(null);
+  };
+
+  // Helpers to resolve parent relationships for Altitude Cascade sorting & alignment
+  const getH4Parent = (v: HorizonItem) => {
+    if (v.parentId) {
+      const parent = h5Purposes.find((p) => p.id === v.parentId);
+      if (parent) return parent;
+    }
+    if (v.lifeDomain) {
+      const parent = h5Purposes.find((p) => p.lifeDomain === v.lifeDomain);
+      if (parent) return parent;
+    }
+    if (h5Purposes.length === 1) return h5Purposes[0];
+    return null;
+  };
+
+  const getH2Parent = (a: HorizonItem) => {
+    if (a.parentId) {
+      const parent = h4Visions.find((v) => v.id === a.parentId);
+      if (parent) return parent;
+    }
+    if (h4Visions.length === 1) return h4Visions[0];
+    return null;
+  };
+
+  const getH3Parent = (g: HorizonItem) => {
+    if (g.parentId) {
+      const parent = h2Areas.find((area) => area.id === g.parentId);
+      if (parent) return parent;
+    }
+    return null;
+  };
+
+  const getProjectParent = (p: GTDProject) => {
+    if (p.goalId) {
+      const goal = h3Goals.find((g) => g.id === p.goalId);
+      if (goal) {
+        return { type: 'goal' as const, id: goal.id, title: goal.title, item: goal };
+      }
+    }
+    if (p.areaId) {
+      const area = h2Areas.find((a) => a.id === p.areaId);
+      if (area) {
+        return { type: 'area' as const, id: area.id, title: area.title, item: area };
+      }
+    }
+    return null;
+  };
+
+  // Sorting helpers to order items in each cascade list by parent hierarchy
+  const sortH4sByParent = (items: HorizonItem[]) => {
+    return [...items].sort((a, b) => {
+      const parentA = getH4Parent(a);
+      const parentB = getH4Parent(b);
+
+      if (parentA && !parentB) return -1;
+      if (!parentA && parentB) return 1;
+
+      if (parentA && parentB && parentA.id !== parentB.id) {
+        const idxA = h5Purposes.findIndex((p) => p.id === parentA.id);
+        const idxB = h5Purposes.findIndex((p) => p.id === parentB.id);
+        if (idxA !== -1 && idxB !== -1 && idxA !== idxB) {
+          return idxA - idxB;
+        }
+        return parentA.title.localeCompare(parentB.title);
+      }
+
+      return a.title.localeCompare(b.title);
+    });
+  };
+
+  const sortH2sByParent = (items: HorizonItem[]) => {
+    return [...items].sort((a, b) => {
+      const parentA = getH2Parent(a);
+      const parentB = getH2Parent(b);
+
+      if (parentA && !parentB) return -1;
+      if (!parentA && parentB) return 1;
+
+      if (parentA && parentB && parentA.id !== parentB.id) {
+        const idxA = h4Visions.findIndex((v) => v.id === parentA.id);
+        const idxB = h4Visions.findIndex((v) => v.id === parentB.id);
+        if (idxA !== -1 && idxB !== -1 && idxA !== idxB) {
+          return idxA - idxB;
+        }
+        return parentA.title.localeCompare(parentB.title);
+      }
+
+      return a.title.localeCompare(b.title);
+    });
+  };
+
+  const sortH3sByParent = (items: HorizonItem[]) => {
+    return [...items].sort((a, b) => {
+      const parentA = getH3Parent(a);
+      const parentB = getH3Parent(b);
+
+      if (parentA && !parentB) return -1;
+      if (!parentA && parentB) return 1;
+
+      if (parentA && parentB && parentA.id !== parentB.id) {
+        const idxA = h2Areas.findIndex((area) => area.id === parentA.id);
+        const idxB = h2Areas.findIndex((area) => area.id === parentB.id);
+        if (idxA !== -1 && idxB !== -1 && idxA !== idxB) {
+          return idxA - idxB;
+        }
+        return parentA.title.localeCompare(parentB.title);
+      }
+
+      return a.title.localeCompare(b.title);
+    });
+  };
+
+  const sortProjectsByParent = (items: GTDProject[]) => {
+    return [...items].sort((a, b) => {
+      const parentA = getProjectParent(a);
+      const parentB = getProjectParent(b);
+
+      if (parentA && !parentB) return -1;
+      if (!parentA && parentB) return 1;
+      if (!parentA && !parentB) return a.title.localeCompare(b.title);
+
+      if (parentA && parentB) {
+        if (parentA.type === 'goal' && parentB.type === 'goal') {
+          if (parentA.id !== parentB.id) {
+            const idxA = h3Goals.findIndex((g) => g.id === parentA.id);
+            const idxB = h3Goals.findIndex((g) => g.id === parentB.id);
+            if (idxA !== -1 && idxB !== -1 && idxA !== idxB) {
+              return idxA - idxB;
+            }
+            return parentA.title.localeCompare(parentB.title);
+          }
+        } else if (parentA.type === 'goal' && parentB.type === 'area') {
+          return -1; // Goal-linked projects first to align with Column 3
+        } else if (parentA.type === 'area' && parentB.type === 'goal') {
+          return 1;
+        } else if (parentA.type === 'area' && parentB.type === 'area') {
+          if (parentA.id !== parentB.id) {
+            const idxA = h2Areas.findIndex((area) => area.id === parentA.id);
+            const idxB = h2Areas.findIndex((area) => area.id === parentB.id);
+            if (idxA !== -1 && idxB !== -1 && idxA !== idxB) {
+              return idxA - idxB;
+            }
+            return parentA.title.localeCompare(parentB.title);
+          }
+        }
+      }
+
+      return a.title.localeCompare(b.title);
+    });
   };
 
   // Compute filtered dataset for Altitude Cascade view when an item is selected
@@ -301,20 +463,182 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
     });
 
     const baseH2s = h2Areas.filter((a) => {
-      if (selectedDomain !== 'all' && a.lifeDomain !== selectedDomain) return false;
+      if (selectedDomain !== 'all' && getHorizonItemDomain(a, horizonItems) !== selectedDomain) return false;
       return matchesSearch(a.title, a.description);
     });
 
     const baseH3s = h3Goals.filter((g) => {
-      if (selectedDomain !== 'all' && g.lifeDomain !== selectedDomain) return false;
+      if (selectedDomain !== 'all' && getHorizonItemDomain(g, horizonItems) !== selectedDomain) return false;
       return matchesSearch(g.title, g.description);
     });
 
     const baseProjects = projects.filter((p) => {
+      if (selectedDomain !== 'all' && getProjectInheritedDomain(p, horizonItems) !== selectedDomain) return false;
       return matchesSearch(p.title, p.desiredOutcome);
     });
 
-    if (!selectedCascadeItem) {
+    const computeFiltered = () => {
+      if (!selectedCascadeItem) {
+        return {
+          h5s: baseH5s,
+          h4s: baseH4s,
+          h2s: baseH2s,
+          h3s: baseH3s,
+          projects: baseProjects,
+          selectedItem: null,
+        };
+      }
+
+      const { id: selId, type: selType } = selectedCascadeItem;
+
+      if (selType === 'h5') {
+        const selectedH5 = h5Purposes.find((p) => p.id === selId);
+        // Children H4 Visions:
+        const childrenH4s = h4Visions.filter((v) =>
+          v.parentId === selId || (!v.parentId && (h5Purposes.length <= 1 || v.lifeDomain === selectedH5?.lifeDomain))
+        );
+        const h4Ids = new Set(childrenH4s.map((v) => v.id));
+
+        // Children H2 Areas:
+        const childrenH2s = h2Areas.filter((a) =>
+          (a.parentId && h4Ids.has(a.parentId)) ||
+          a.parentId === selId ||
+          (!a.parentId && selectedH5?.lifeDomain && getHorizonItemDomain(a, horizonItems) === selectedH5.lifeDomain)
+        );
+        const h2Ids = new Set(childrenH2s.map((a) => a.id));
+
+        // Children H3 Goals:
+        const childrenH3s = h3Goals.filter((g) => g.parentId && h2Ids.has(g.parentId));
+        const h3Ids = new Set(childrenH3s.map((g) => g.id));
+
+        // Children Projects:
+        const childrenProjects = projects.filter((p) =>
+          (p.goalId && h3Ids.has(p.goalId)) || (p.areaId && h2Ids.has(p.areaId))
+        );
+
+        return {
+          h5s: baseH5s.filter((p) => p.id === selId),
+          h4s: childrenH4s,
+          h2s: childrenH2s,
+          h3s: childrenH3s,
+          projects: childrenProjects,
+          selectedItem: {
+            id: selId,
+            type: 'H5 Purpose' as const,
+            title: selectedH5?.title || 'H5 Purpose',
+            color: '#C5A47E',
+          },
+        };
+      }
+
+      if (selType === 'h4') {
+        const selectedH4 = h4Visions.find((v) => v.id === selId);
+        const parentH5s = h5Purposes.filter((p) => p.id === selectedH4?.parentId || (selectedH4?.lifeDomain && p.lifeDomain === selectedH4.lifeDomain));
+
+        // Children H2 Areas:
+        const childrenH2s = h2Areas.filter((a) =>
+          a.parentId === selId || (!a.parentId && selectedH4?.lifeDomain && getHorizonItemDomain(a, horizonItems) === selectedH4.lifeDomain)
+        );
+        const h2Ids = new Set(childrenH2s.map((a) => a.id));
+
+        // Children H3 Goals:
+        const childrenH3s = h3Goals.filter((g) => g.parentId && h2Ids.has(g.parentId));
+        const h3Ids = new Set(childrenH3s.map((g) => g.id));
+
+        // Children Projects:
+        const childrenProjects = projects.filter((p) =>
+          (p.goalId && h3Ids.has(p.goalId)) || (p.areaId && h2Ids.has(p.areaId))
+        );
+
+        return {
+          h5s: parentH5s.length > 0 ? parentH5s : baseH5s,
+          h4s: baseH4s.filter((v) => v.id === selId),
+          h2s: childrenH2s,
+          h3s: childrenH3s,
+          projects: childrenProjects,
+          selectedItem: {
+            id: selId,
+            type: 'H4 Vision' as const,
+            title: selectedH4?.title || 'H4 Vision',
+            color: '#818cf8',
+          },
+        };
+      }
+
+      if (selType === 'h2') {
+        const selectedH2 = h2Areas.find((a) => a.id === selId);
+        const parentH4s = h4Visions.filter((v) => v.id === selectedH2?.parentId || (!selectedH2?.parentId && v.lifeDomain === getHorizonItemDomain(selectedH2, horizonItems)));
+        const parentH5s = h5Purposes.filter((p) => parentH4s.some((v) => v.parentId === p.id || (v.lifeDomain && v.lifeDomain === p.lifeDomain)));
+
+        // Children H3 Goals:
+        const childrenH3s = h3Goals.filter((g) => g.parentId === selId);
+        const h3Ids = new Set(childrenH3s.map((g) => g.id));
+
+        // Children Projects (under this Area or under this Area's Goals):
+        const childrenProjects = projects.filter((p) =>
+          p.areaId === selId || (p.goalId && h3Ids.has(p.goalId))
+        );
+
+        return {
+          h5s: parentH5s.length > 0 ? parentH5s : baseH5s,
+          h4s: parentH4s.length > 0 ? parentH4s : baseH4s,
+          h2s: baseH2s.filter((a) => a.id === selId),
+          h3s: childrenH3s,
+          projects: childrenProjects,
+          selectedItem: {
+            id: selId,
+            type: 'H2 Area of Focus' as const,
+            title: selectedH2?.title || 'H2 Area of Focus',
+            color: '#34d399',
+          },
+        };
+      }
+
+      if (selType === 'h3') {
+        const selectedH3 = h3Goals.find((g) => g.id === selId);
+        const parentH2s = h2Areas.filter((a) => a.id === selectedH3?.parentId);
+        const parentH4s = h4Visions.filter((v) => parentH2s.some((a) => a.parentId === v.id || (!a.parentId && v.lifeDomain === getHorizonItemDomain(a, horizonItems))));
+        const parentH5s = h5Purposes.filter((p) => parentH4s.some((v) => v.parentId === p.id || (v.lifeDomain && v.lifeDomain === p.lifeDomain)));
+
+        // Children Projects (specifically linked to this H3 Goal):
+        const childrenProjects = projects.filter((p) => p.goalId === selId);
+
+        return {
+          h5s: parentH5s.length > 0 ? parentH5s : baseH5s,
+          h4s: parentH4s.length > 0 ? parentH4s : baseH4s,
+          h2s: parentH2s.length > 0 ? parentH2s : baseH2s,
+          h3s: baseH3s.filter((g) => g.id === selId),
+          projects: childrenProjects,
+          selectedItem: {
+            id: selId,
+            type: 'H3 Goal' as const,
+            title: selectedH3?.title || 'H3 Goal',
+            color: '#38bdf8',
+          },
+        };
+      }
+
+      if (selType === 'project') {
+        const selectedProj = projects.find((p) => p.id === selId);
+        const parentH3s = h3Goals.filter((g) => g.id === selectedProj?.goalId);
+        const parentH2s = h2Areas.filter((a) => a.id === selectedProj?.areaId || parentH3s.some((g) => g.parentId === a.id));
+        const parentH4s = h4Visions.filter((v) => parentH2s.some((a) => a.parentId === v.id));
+
+        return {
+          h5s: baseH5s,
+          h4s: parentH4s.length > 0 ? parentH4s : baseH4s,
+          h2s: parentH2s.length > 0 ? parentH2s : baseH2s,
+          h3s: parentH3s.length > 0 ? parentH3s : baseH3s,
+          projects: baseProjects.filter((p) => p.id === selId),
+          selectedItem: {
+            id: selId,
+            type: 'H1 Project' as const,
+            title: selectedProj?.title || 'H1 Project',
+            color: '#fbbf24',
+          },
+        };
+      }
+
       return {
         h5s: baseH5s,
         h4s: baseH4s,
@@ -323,167 +647,22 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
         projects: baseProjects,
         selectedItem: null,
       };
-    }
+    };
 
-    const { id: selId, type: selType } = selectedCascadeItem;
+    const raw = computeFiltered();
 
-    if (selType === 'h5') {
-      const selectedH5 = h5Purposes.find((p) => p.id === selId);
-      // Children H4 Visions:
-      const childrenH4s = h4Visions.filter((v) =>
-        v.parentId === selId || (!v.parentId && (h5Purposes.length <= 1 || v.lifeDomain === selectedH5?.lifeDomain))
-      );
-      const h4Ids = new Set(childrenH4s.map((v) => v.id));
-
-      // Children H2 Areas:
-      const childrenH2s = h2Areas.filter((a) =>
-        (a.parentId && h4Ids.has(a.parentId)) ||
-        a.parentId === selId ||
-        (!a.parentId && selectedH5?.lifeDomain && a.lifeDomain === selectedH5.lifeDomain)
-      );
-      const h2Ids = new Set(childrenH2s.map((a) => a.id));
-
-      // Children H3 Goals:
-      const childrenH3s = h3Goals.filter((g) => g.parentId && h2Ids.has(g.parentId));
-      const h3Ids = new Set(childrenH3s.map((g) => g.id));
-
-      // Children Projects:
-      const childrenProjects = projects.filter((p) =>
-        (p.goalId && h3Ids.has(p.goalId)) || (p.areaId && h2Ids.has(p.areaId))
-      );
-
-      return {
-        h5s: baseH5s.filter((p) => p.id === selId),
-        h4s: childrenH4s,
-        h2s: childrenH2s,
-        h3s: childrenH3s,
-        projects: childrenProjects,
-        selectedItem: {
-          id: selId,
-          type: 'H5 Purpose',
-          title: selectedH5?.title || 'H5 Purpose',
-          color: '#C5A47E',
-        },
-      };
-    }
-
-    if (selType === 'h4') {
-      const selectedH4 = h4Visions.find((v) => v.id === selId);
-      const parentH5s = h5Purposes.filter((p) => p.id === selectedH4?.parentId || (selectedH4?.lifeDomain && p.lifeDomain === selectedH4.lifeDomain));
-
-      // Children H2 Areas:
-      const childrenH2s = h2Areas.filter((a) =>
-        a.parentId === selId || (!a.parentId && selectedH4?.lifeDomain && a.lifeDomain === selectedH4.lifeDomain)
-      );
-      const h2Ids = new Set(childrenH2s.map((a) => a.id));
-
-      // Children H3 Goals:
-      const childrenH3s = h3Goals.filter((g) => g.parentId && h2Ids.has(g.parentId));
-      const h3Ids = new Set(childrenH3s.map((g) => g.id));
-
-      // Children Projects:
-      const childrenProjects = projects.filter((p) =>
-        (p.goalId && h3Ids.has(p.goalId)) || (p.areaId && h2Ids.has(p.areaId))
-      );
-
-      return {
-        h5s: parentH5s.length > 0 ? parentH5s : baseH5s,
-        h4s: baseH4s.filter((v) => v.id === selId),
-        h2s: childrenH2s,
-        h3s: childrenH3s,
-        projects: childrenProjects,
-        selectedItem: {
-          id: selId,
-          type: 'H4 Vision',
-          title: selectedH4?.title || 'H4 Vision',
-          color: '#818cf8',
-        },
-      };
-    }
-
-    if (selType === 'h2') {
-      const selectedH2 = h2Areas.find((a) => a.id === selId);
-      const parentH4s = h4Visions.filter((v) => v.id === selectedH2?.parentId || (selectedH2?.lifeDomain && v.lifeDomain === selectedH2.lifeDomain));
-      const parentH5s = h5Purposes.filter((p) => selectedH2?.lifeDomain && p.lifeDomain === selectedH2.lifeDomain);
-
-      // Children H3 Goals:
-      const childrenH3s = h3Goals.filter((g) => g.parentId === selId);
-      const h3Ids = new Set(childrenH3s.map((g) => g.id));
-
-      // Children Projects (under this Area or under this Area's Goals):
-      const childrenProjects = projects.filter((p) =>
-        p.areaId === selId || (p.goalId && h3Ids.has(p.goalId))
-      );
-
-      return {
-        h5s: parentH5s.length > 0 ? parentH5s : baseH5s,
-        h4s: parentH4s.length > 0 ? parentH4s : baseH4s,
-        h2s: baseH2s.filter((a) => a.id === selId),
-        h3s: childrenH3s,
-        projects: childrenProjects,
-        selectedItem: {
-          id: selId,
-          type: 'H2 Area of Focus',
-          title: selectedH2?.title || 'H2 Area of Focus',
-          color: '#34d399',
-        },
-      };
-    }
-
-    if (selType === 'h3') {
-      const selectedH3 = h3Goals.find((g) => g.id === selId);
-      const parentH2s = h2Areas.filter((a) => a.id === selectedH3?.parentId);
-      const parentH4s = h4Visions.filter((v) => parentH2s.some((a) => a.parentId === v.id || (a.lifeDomain && a.lifeDomain === v.lifeDomain)));
-      const parentH5s = h5Purposes.filter((p) => selectedH3?.lifeDomain && p.lifeDomain === selectedH3.lifeDomain);
-
-      // Children Projects (specifically linked to this H3 Goal):
-      const childrenProjects = projects.filter((p) => p.goalId === selId);
-
-      return {
-        h5s: parentH5s.length > 0 ? parentH5s : baseH5s,
-        h4s: parentH4s.length > 0 ? parentH4s : baseH4s,
-        h2s: parentH2s.length > 0 ? parentH2s : baseH2s,
-        h3s: baseH3s.filter((g) => g.id === selId),
-        projects: childrenProjects,
-        selectedItem: {
-          id: selId,
-          type: 'H3 Goal',
-          title: selectedH3?.title || 'H3 Goal',
-          color: '#38bdf8',
-        },
-      };
-    }
-
-    if (selType === 'project') {
-      const selectedProj = projects.find((p) => p.id === selId);
-      const parentH3s = h3Goals.filter((g) => g.id === selectedProj?.goalId);
-      const parentH2s = h2Areas.filter((a) => a.id === selectedProj?.areaId || parentH3s.some((g) => g.parentId === a.id));
-      const parentH4s = h4Visions.filter((v) => parentH2s.some((a) => a.parentId === v.id));
-
-      return {
-        h5s: baseH5s,
-        h4s: parentH4s.length > 0 ? parentH4s : baseH4s,
-        h2s: parentH2s.length > 0 ? parentH2s : baseH2s,
-        h3s: parentH3s.length > 0 ? parentH3s : baseH3s,
-        projects: baseProjects.filter((p) => p.id === selId),
-        selectedItem: {
-          id: selId,
-          type: 'H1 Project',
-          title: selectedProj?.title || 'H1 Project',
-          color: '#fbbf24',
-        },
-      };
+    if (!cascadeSortByParent) {
+      return raw;
     }
 
     return {
-      h5s: baseH5s,
-      h4s: baseH4s,
-      h2s: baseH2s,
-      h3s: baseH3s,
-      projects: baseProjects,
-      selectedItem: null,
+      ...raw,
+      h4s: sortH4sByParent(raw.h4s),
+      h2s: sortH2sByParent(raw.h2s),
+      h3s: sortH3sByParent(raw.h3s),
+      projects: sortProjectsByParent(raw.projects),
     };
-  }, [selectedCascadeItem, h5Purposes, h4Visions, h2Areas, h3Goals, projects, selectedDomain, searchQuery]);
+  }, [selectedCascadeItem, h5Purposes, h4Visions, h2Areas, h3Goals, projects, selectedDomain, searchQuery, cascadeSortByParent]);
 
   // Active Cascade Highlight ID (hover takes precedence, fallback to selected focus item)
   const activeCascadeId = hoveredCascadeItemId || selectedCascadeItem?.id || null;
@@ -533,7 +712,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
         });
 
         const childH2s = h2Areas.filter(
-          (a) => a.parentId === v.id || (!a.parentId && v.lifeDomain && a.lifeDomain === v.lifeDomain)
+          (a) => a.parentId === v.id || (!a.parentId && v.lifeDomain && getHorizonItemDomain(a, horizonItems) === v.lifeDomain)
         );
         childH2s.forEach((a) => {
           connectedIds.add(a.id);
@@ -615,7 +794,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
       }
 
       const childH2s = h2Areas.filter(
-        (a) => a.parentId === activeCascadeId || (!a.parentId && curH4?.lifeDomain && a.lifeDomain === curH4.lifeDomain)
+        (a) => a.parentId === activeCascadeId || (!a.parentId && curH4?.lifeDomain && getHorizonItemDomain(a, horizonItems) === curH4.lifeDomain)
       );
       childH2s.forEach((a) => {
         connectedIds.add(a.id);
@@ -680,7 +859,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
     if (isH2) {
       const curH2 = h2Areas.find((a) => a.id === activeCascadeId);
       const parentH4 = h4Visions.find(
-        (v) => v.id === curH2?.parentId || (curH2?.lifeDomain && v.lifeDomain === curH2.lifeDomain)
+        (v) => v.id === curH2?.parentId || (!curH2?.parentId && v.lifeDomain === getHorizonItemDomain(curH2, horizonItems))
       );
       if (parentH4) {
         connectedIds.add(parentH4.id);
@@ -774,7 +953,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
         });
 
         const parentH4 = h4Visions.find(
-          (v) => v.id === parentH2.parentId || (parentH2.lifeDomain && v.lifeDomain === parentH2.lifeDomain)
+          (v) => v.id === parentH2.parentId || (!parentH2.parentId && v.lifeDomain === getHorizonItemDomain(parentH2, horizonItems))
         );
         if (parentH4) {
           connectedIds.add(parentH4.id);
@@ -852,7 +1031,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
             });
 
             const parentH4 = h4Visions.find(
-              (v) => v.id === parentH2.parentId || (parentH2.lifeDomain && v.lifeDomain === parentH2.lifeDomain)
+              (v) => v.id === parentH2.parentId || (!parentH2.parentId && v.lifeDomain === getHorizonItemDomain(parentH2, horizonItems))
             );
             if (parentH4) {
               connectedIds.add(parentH4.id);
@@ -900,7 +1079,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
           });
 
           const parentH4 = h4Visions.find(
-            (v) => v.id === parentH2.parentId || (parentH2.lifeDomain && v.lifeDomain === parentH2.lifeDomain)
+            (v) => v.id === parentH2.parentId || (!parentH2.parentId && v.lifeDomain === getHorizonItemDomain(parentH2, horizonItems))
           );
           if (parentH4) {
             connectedIds.add(parentH4.id);
@@ -1055,7 +1234,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
     };
   }, [activeLinks, mapLayout, cascadeFilteredData, hoveredCascadeItemId, selectedCascadeItem]);
 
-  // Auto-scroll connected items into view in their respective scrollable column containers
+  // Auto-scroll connected items into view in their respective scrollable column containers (excluding the list on which mouse is hovering)
   useEffect(() => {
     if (mapLayout !== 'altitude-cascade' || !activeCascadeId || !cascadeContainerRef.current) return;
 
@@ -1063,11 +1242,31 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
     const targetIds = Array.from(activeConnectedIds);
     if (targetIds.length === 0) return;
 
+    // Identify the scrollable list container on which the mouse is currently hovering (if any)
+    let hoveredScrollParent: HTMLElement | null = null;
+    if (hoveredCascadeItemId) {
+      const hoveredEl = container.querySelector<HTMLElement>(`[data-cascade-id="${hoveredCascadeItemId}"]`);
+      hoveredScrollParent = hoveredEl?.closest('.cascade-scroll-container') as HTMLElement | null;
+    }
+
     targetIds.forEach((id) => {
+      // Never auto-scroll the hovered item itself
+      if (hoveredCascadeItemId && id === hoveredCascadeItemId) return;
+
       const el = container.querySelector<HTMLElement>(`[data-cascade-id="${id}"]`);
       if (el) {
         const scrollParent = el.closest('.cascade-scroll-container') as HTMLElement | null;
         if (scrollParent) {
+          // Do not auto scroll the list on which the mouse is hovering
+          const isHoveredList =
+            (hoveredScrollParent && (scrollParent === hoveredScrollParent || scrollParent.contains(hoveredScrollParent))) ||
+            (typeof scrollParent.matches === 'function' && scrollParent.matches(':hover')) ||
+            (scrollParent.parentElement && typeof scrollParent.parentElement.matches === 'function' && scrollParent.parentElement.matches(':hover'));
+
+          if (isHoveredList) {
+            return;
+          }
+
           const parentRect = scrollParent.getBoundingClientRect();
           const elRect = el.getBoundingClientRect();
 
@@ -1100,7 +1299,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
     return () => {
       if (animFrame) cancelAnimationFrame(animFrame);
     };
-  }, [activeCascadeId, activeConnectedIds, mapLayout]);
+  }, [activeCascadeId, activeConnectedIds, mapLayout, hoveredCascadeItemId]);
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -1108,59 +1307,29 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
       {/* Control Panel Toolbar */}
       <div className="bg-[#141414] rounded-2xl border border-[#262626] p-3 sm:p-5 shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
         
-        {/* Left: View Modes & Collapse */}
+        {/* Left: Contextual Controls (Expand/Collapse for Graph, Sort by Parent for Kanban) */}
         <div className="flex flex-wrap items-center justify-between sm:justify-start gap-2 sm:gap-3">
-          
-          {/* Graph View / Cascade Selector */}
-          <div className="bg-[#1E1E1E] border border-[#262626] p-1 rounded-xl flex items-center gap-1 text-xs font-semibold">
-            <button
-              onClick={() => setMapLayout('graph-view')}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                mapLayout === 'graph-view'
-                  ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <Network className="w-3.5 h-3.5" />
-              <span className="sm:hidden">Graph</span>
-              <span className="hidden sm:inline">Horizon Graph (H5 Central)</span>
-            </button>
-            <button
-              onClick={() => setMapLayout('altitude-cascade')}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                mapLayout === 'altitude-cascade'
-                  ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span className="sm:hidden">Cascade</span>
-              <span className="hidden sm:inline">Altitude Cascade</span>
-            </button>
-          </div>
-
-          <div className="h-5 w-px bg-[#262626] hidden sm:block" />
-
-          {/* Expand / Collapse All */}
-          <div className="flex items-center gap-1 text-xs">
-            <button
-              onClick={expandAll}
-              className="px-2 sm:px-2.5 py-1.5 bg-[#191919] hover:bg-[#222] border border-[#262626] rounded-xl text-gray-300 text-xs font-medium transition-colors cursor-pointer"
-              title="Expand all branches"
-            >
-              <span className="sm:hidden">Expand</span>
-              <span className="hidden sm:inline">Expand All</span>
-            </button>
-            <button
-              onClick={collapseAll}
-              className="px-2 sm:px-2.5 py-1.5 bg-[#191919] hover:bg-[#222] border border-[#262626] rounded-xl text-gray-300 text-xs font-medium transition-colors cursor-pointer"
-              title="Collapse all branches"
-            >
-              <span className="sm:hidden">Collapse</span>
-              <span className="hidden sm:inline">Collapse All</span>
-            </button>
-          </div>
-
+          {mapLayout === 'graph-view' ? (
+            /* Expand / Collapse All */
+            <div className="flex items-center gap-1 text-xs">
+              <button
+                onClick={expandAll}
+                className="px-2 sm:px-2.5 py-1.5 bg-[#191919] hover:bg-[#222] border border-[#262626] rounded-xl text-gray-300 text-xs font-medium transition-colors cursor-pointer"
+                title="Expand all branches"
+              >
+                <span className="sm:hidden">Expand</span>
+                <span className="hidden sm:inline">Expand All</span>
+              </button>
+              <button
+                onClick={collapseAll}
+                className="px-2 sm:px-2.5 py-1.5 bg-[#191919] hover:bg-[#222] border border-[#262626] rounded-xl text-gray-300 text-xs font-medium transition-colors cursor-pointer"
+                title="Collapse all branches"
+              >
+                <span className="sm:hidden">Collapse</span>
+                <span className="hidden sm:inline">Collapse All</span>
+              </button>
+            </div>
+          ) : null}
         </div>
 
         {/* Right: Filters & Zoom */}
@@ -1173,7 +1342,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Filter graph nodes..."
+              placeholder={mapLayout === 'altitude-cascade' ? "Filter Kanban items..." : "Filter graph nodes..."}
               className="pl-8 pr-3 py-1.5 bg-[#191919] border border-[#262626] rounded-xl text-xs text-gray-200 placeholder-gray-500 focus:outline-hidden focus:border-[#C5A47E] w-full sm:w-44 md:w-52"
             />
             {searchQuery && (
@@ -1204,131 +1373,32 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
               </select>
             </div>
 
-            {/* Zoom Controls */}
-            <div className="flex items-center gap-0.5 sm:gap-1 bg-[#191919] border border-[#262626] rounded-xl p-0.5 text-xs shrink-0">
-              <button
-                onClick={() => setZoomScale((prev) => Math.max(75, prev - 10))}
-                className="p-1 text-gray-400 hover:text-white rounded cursor-pointer"
-                title="Zoom out"
-              >
-                <ZoomOut className="w-3.5 h-3.5" />
-              </button>
-              <span className="text-[10px] font-mono px-1 text-gray-400 min-w-[28px] sm:min-w-[32px] text-center">
-                {zoomScale}%
-              </span>
-              <button
-                onClick={() => setZoomScale((prev) => Math.min(125, prev + 10))}
-                className="p-1 text-gray-400 hover:text-white rounded cursor-pointer"
-                title="Zoom in"
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            {/* Zoom Controls (Graph view only) */}
+            {mapLayout === 'graph-view' && (
+              <div className="flex items-center gap-0.5 sm:gap-1 bg-[#191919] border border-[#262626] rounded-xl p-0.5 text-xs shrink-0">
+                <button
+                  onClick={() => setZoomScale((prev) => Math.max(75, prev - 10))}
+                  className="p-1 text-gray-400 hover:text-white rounded cursor-pointer"
+                  title="Zoom out"
+                >
+                  <ZoomOut className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-[10px] font-mono px-1 text-gray-400 min-w-[28px] sm:min-w-[32px] text-center">
+                  {zoomScale}%
+                </span>
+                <button
+                  onClick={() => setZoomScale((prev) => Math.min(125, prev + 10))}
+                  className="p-1 text-gray-400 hover:text-white rounded cursor-pointer"
+                  title="Zoom in"
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
 
         </div>
 
-      </div>
-
-      {/* Altitude Legend Banner - Streamlined & Horizontal Scroll on Mobile */}
-      <div className="bg-[#141414] rounded-2xl border border-[#262626] p-2.5 sm:px-5 sm:py-3 text-xs overflow-hidden">
-        {/* Mobile Horizontal Scrollable Ribbon */}
-        <div className="flex sm:hidden items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 whitespace-nowrap text-[10px] font-semibold">
-          <span className="text-gray-500 uppercase tracking-wider font-mono text-[9px] mr-0.5 shrink-0">Hierarchy:</span>
-          
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#C5A47E]/10 border border-[#C5A47E]/30 text-[#C5A47E] shrink-0">
-            <Compass className="w-2.5 h-2.5" />
-            <span>H5 Purpose</span>
-          </div>
-
-          <span className="text-gray-600 shrink-0">→</span>
-
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-700/40 text-indigo-300 shrink-0">
-            <Eye className="w-2.5 h-2.5 text-indigo-400" />
-            <span>H4 Vision</span>
-          </div>
-
-          <span className="text-gray-600 shrink-0">→</span>
-
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-950/60 border border-emerald-700/40 text-emerald-300 shrink-0">
-            <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
-            <span>H2 Area</span>
-          </div>
-
-          <span className="text-gray-600 shrink-0">→</span>
-
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-950/60 border border-sky-700/40 text-sky-300 shrink-0">
-            <Target className="w-2.5 h-2.5 text-sky-400" />
-            <span>H3 Goal</span>
-          </div>
-
-          <span className="text-gray-600 shrink-0">→</span>
-
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-950/60 border border-amber-700/40 text-amber-300 shrink-0">
-            <Briefcase className="w-2.5 h-2.5 text-amber-400" />
-            <span>H1 Project</span>
-          </div>
-
-          <span className="text-gray-600 shrink-0">→</span>
-
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-neutral-800 border border-neutral-700 text-gray-200 shrink-0">
-            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
-            <span>Runway</span>
-          </div>
-        </div>
-
-        {/* Desktop Layout */}
-        <div className="hidden sm:flex items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-[11px] font-semibold">
-            <span className="text-gray-500 uppercase tracking-wider font-mono text-[10px]">Hierarchy:</span>
-            
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-[#C5A47E]/10 border border-[#C5A47E]/30 text-[#C5A47E]">
-              <Compass className="w-3 h-3" />
-              <span>H5 Central Purpose</span>
-            </div>
-
-            <span className="text-gray-600">→</span>
-
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-indigo-950/60 border border-indigo-700/40 text-indigo-300">
-              <Eye className="w-3 h-3 text-indigo-400" />
-              <span>H4 Vision</span>
-            </div>
-
-            <span className="text-gray-600">→</span>
-
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-emerald-950/60 border border-emerald-700/40 text-emerald-300">
-              <ShieldCheck className="w-3 h-3 text-emerald-400" />
-              <span>H2 Area of Focus</span>
-            </div>
-
-            <span className="text-gray-600">→</span>
-
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-sky-950/60 border border-sky-700/40 text-sky-300">
-              <Target className="w-3 h-3 text-sky-400" />
-              <span>H3 Goal</span>
-            </div>
-
-            <span className="text-gray-600">→</span>
-
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-amber-950/60 border border-amber-700/40 text-amber-300">
-              <Briefcase className="w-3 h-3 text-amber-400" />
-              <span>H1 Project</span>
-            </div>
-
-            <span className="text-gray-600">→</span>
-
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-neutral-800 border border-neutral-700 text-gray-200">
-              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-              <span>Runway Action</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 text-[11px] text-gray-400 font-mono shrink-0">
-            <span className="px-2 py-0.5 rounded-md bg-[#1f1f1f] border border-[#2a2a2a] text-gray-300">
-              Full Continuum Active
-            </span>
-          </div>
-        </div>
       </div>
 
       {/* GRAPH VIEW: CENTRAL H5 NODE GRAPH */}
@@ -1645,11 +1715,14 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                                                       <span className="sm:hidden">H2 • 20k ft</span>
                                                       <span className="hidden sm:inline">H2 Area • 20,000 ft</span>
                                                     </span>
-                                                    {area.lifeDomain && (
-                                                      <span className="text-[9px] sm:text-[10px] text-gray-400 font-medium px-1.5 py-0.5 rounded bg-[#1c1c1c] border border-[#2c2c2c]">
-                                                        {area.lifeDomain}
-                                                      </span>
-                                                    )}
+                                                    {(() => {
+                                                      const d = getHorizonItemDomain(area, horizonItems);
+                                                      return d ? (
+                                                        <span className="text-[9px] sm:text-[10px] text-gray-400 font-medium px-1.5 py-0.5 rounded bg-[#1c1c1c] border border-[#2c2c2c]">
+                                                          {d}
+                                                        </span>
+                                                      ) : null;
+                                                    })()}
                                                     <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-neutral-800/80 border border-neutral-700/50 text-gray-300 text-[9px] sm:text-[10px] font-mono flex items-center gap-1">
                                                       <span>{goals.length} {goals.length === 1 ? 'goal' : 'goals'}</span>
                                                       <span>·</span>
@@ -2376,6 +2449,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                   const isSelected = selectedCascadeItem?.id === p.id && selectedCascadeItem.type === 'h5';
                   const isHovered = hoveredCascadeItemId === p.id;
                   const isConnected = activeConnectedIds.has(p.id);
+                  const linkedVisions = cascadeFilteredData.h4s.filter((v) => v.parentId === p.id);
 
                   return (
                     <div
@@ -2395,20 +2469,39 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                       )}
                       title={isSelected ? 'Click to unselect / show all' : 'Click to isolate and show only its children'}
                     >
-                      <div className="flex items-center justify-between text-[10px] font-bold text-[#C5A47E] uppercase font-mono">
-                        <span className="flex items-center gap-1.5">
-                          {(isSelected || isHovered || isConnected) && <span className="w-2 h-2 rounded-full bg-[#C5A47E] animate-pulse" />}
-                          <span>{isSelected ? '✓ Selected H5' : isConnected ? '🔗 Linked H5' : 'H5 Purpose'}</span>
+                      <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-[#C5A47E] uppercase font-mono">
+                        <span className="flex items-center gap-1.5 truncate">
+                          {(isSelected || isHovered || isConnected) && <span className="w-2 h-2 rounded-full bg-[#C5A47E] animate-pulse shrink-0" />}
+                          <span className="truncate">{isSelected ? '✓ Selected H5' : isConnected ? '🔗 Linked H5' : 'H5 Purpose'}</span>
                         </span>
-                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                          <button onClick={() => onOpenEditModal(p)} className="p-1 text-gray-400 hover:text-white rounded">
+                        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => onOpenEditModal(p)}
+                            className="p-1 text-gray-400 hover:text-white rounded transition-colors cursor-pointer"
+                            title="Edit H5 Purpose"
+                          >
                             <Edit3 className="w-3 h-3" />
                           </button>
                         </div>
                       </div>
                       <h4 className="text-xs font-bold text-white font-serif">{p.title}</h4>
                       {p.description && <p className="text-[11px] text-gray-400 line-clamp-2">{p.description}</p>}
-                      <div className="text-[10px] text-gray-500 pt-1 flex items-center justify-between border-t border-[#222]">
+
+                      <div className="flex items-center justify-between text-[11px] pt-1 border-t border-[#222]" onClick={(e) => e.stopPropagation()}>
+                        <span className="text-gray-500 text-[10px]">Visions</span>
+                        <button
+                          onClick={() => onOpenAddModal(4, p.id)}
+                          className="group/btn px-1.5 py-0.5 rounded-md bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-800/50 hover:border-indigo-600 text-indigo-300 font-mono text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                          title="Add H4 Vision under this Purpose"
+                        >
+                          <Eye className="w-2.5 h-2.5 shrink-0" />
+                          <span>{linkedVisions.length}</span>
+                          <span className="hidden group-hover/btn:inline text-[9px] font-sans font-medium transition-all">Vision</span>
+                          <Plus className="w-2.5 h-2.5 opacity-80 group-hover/btn:opacity-100 group-hover/btn:scale-110 transition-transform shrink-0" />
+                        </button>
+                      </div>
+
+                      <div className="text-[10px] text-gray-500 pt-0.5 flex items-center justify-between border-t border-[#1e1e1e]">
                         <span>{isSelected ? 'Showing linked visions & areas' : 'Click to isolate children'}</span>
                         <ArrowRight className={'w-3 h-3 text-[#C5A47E] transition-transform ' + (isSelected || isHovered ? 'translate-x-1' : '')} />
                       </div>
@@ -2420,6 +2513,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                   const isSelected = selectedCascadeItem?.id === v.id && selectedCascadeItem.type === 'h4';
                   const isHovered = hoveredCascadeItemId === v.id;
                   const isConnected = activeConnectedIds.has(v.id);
+                  const linkedAreas = cascadeFilteredData.h2s.filter((a) => a.parentId === v.id);
 
                   return (
                     <div
@@ -2439,20 +2533,54 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                       )}
                       title={isSelected ? 'Click to unselect / show all' : 'Click to isolate and show only its children'}
                     >
-                      <div className="flex items-center justify-between text-[10px] font-bold text-indigo-400 uppercase font-mono">
-                        <span className="flex items-center gap-1.5">
-                          {(isSelected || isHovered || isConnected) && <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />}
-                          <span>{isSelected ? '✓ Selected H4' : isConnected ? '🔗 Linked H4' : 'H4 Vision'}</span>
+                      <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-indigo-400 uppercase font-mono">
+                        <span className="flex items-center gap-1.5 truncate">
+                          {(isSelected || isHovered || isConnected) && <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse shrink-0" />}
+                          <span className="truncate">{isSelected ? '✓ Selected H4' : isConnected ? '🔗 Linked H4' : 'H4 Vision'}</span>
                         </span>
-                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                          <button onClick={() => onOpenEditModal(v)} className="p-1 text-gray-400 hover:text-white rounded">
+                        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => onOpenEditModal(v)}
+                            className="p-1 text-gray-400 hover:text-white rounded transition-colors cursor-pointer"
+                            title="Edit H4 Vision"
+                          >
                             <Edit3 className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => onDeletePrompt(v)}
+                            className="p-1 text-gray-400 hover:text-rose-400 rounded transition-colors cursor-pointer"
+                            title="Delete H4 Vision"
+                          >
+                            <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
                       </div>
                       <h4 className="text-xs font-bold text-white font-serif">{v.title}</h4>
-                      {v.targetDate && <span className="text-[10px] text-indigo-300/80 font-mono block">Target: {v.targetDate}</span>}
-                      <div className="text-[10px] text-gray-500 pt-1 flex items-center justify-between border-t border-[#222]">
+                      {(() => {
+                        const parentH5 = getH4Parent(v);
+                        return parentH5 ? (
+                          <div className="text-[10px] text-[#C5A47E] flex items-center gap-1 font-medium truncate" title={`Parent Purpose: ${parentH5.title}`}>
+                            <Compass className="w-2.5 h-2.5 shrink-0" />
+                            <span className="truncate">{parentH5.title}</span>
+                          </div>
+                        ) : null;
+                      })()}
+
+                      <div className="flex items-center justify-between text-[11px] pt-1 border-t border-[#222]" onClick={(e) => e.stopPropagation()}>
+                        <span className="text-[10px] text-indigo-300/80 font-mono truncate">{v.targetDate ? `Target: ${v.targetDate}` : 'Areas of Focus'}</span>
+                        <button
+                          onClick={() => onOpenAddModal(2, v.id)}
+                          className="group/btn px-1.5 py-0.5 rounded-md bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-800/50 hover:border-emerald-600 text-emerald-300 font-mono text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                          title="Add H2 Area under this Vision"
+                        >
+                          <ShieldCheck className="w-2.5 h-2.5 shrink-0" />
+                          <span>{linkedAreas.length}</span>
+                          <span className="hidden group-hover/btn:inline text-[9px] font-sans font-medium transition-all">Area</span>
+                          <Plus className="w-2.5 h-2.5 opacity-80 group-hover/btn:opacity-100 group-hover/btn:scale-110 transition-transform shrink-0" />
+                        </button>
+                      </div>
+
+                      <div className="text-[10px] text-gray-500 pt-0.5 flex items-center justify-between border-t border-[#1e1e1e]">
                         <span>{isSelected ? 'Showing linked areas & goals' : 'Click to isolate children'}</span>
                         <ArrowRight className={'w-3 h-3 text-indigo-400 transition-transform ' + (isSelected || isHovered ? 'translate-x-1' : '')} />
                       </div>
@@ -2526,32 +2654,64 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                         )}
                         title={isSelected ? 'Click to unselect / show all' : 'Click to isolate and show only its children'}
                       >
-                        <div className="flex items-center justify-between text-[10px] font-bold text-emerald-400 uppercase font-mono">
-                          <span className="flex items-center gap-1.5">
-                            {(isSelected || isHovered || isConnected) && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
-                            <span>{isSelected ? '✓ Selected H2 Area' : isConnected ? '🔗 Linked H2' : 'Horizon 2 Area'}</span>
+                        <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-emerald-400 uppercase font-mono">
+                          <span className="flex items-center gap-1.5 truncate">
+                            {(isSelected || isHovered || isConnected) && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />}
+                            <span className="truncate">{isSelected ? '✓ Selected H2 Area' : isConnected ? '🔗 Linked H2' : 'Horizon 2 Area'}</span>
                           </span>
-                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => onOpenEditModal(area)} className="p-1 text-gray-400 hover:text-white rounded">
+                          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => onOpenEditModal(area)}
+                              className="p-1 text-gray-400 hover:text-white rounded transition-colors cursor-pointer"
+                              title="Edit H2 Area"
+                            >
                               <Edit3 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => onDeletePrompt(area)}
+                              className="p-1 text-gray-400 hover:text-rose-400 rounded transition-colors cursor-pointer"
+                              title="Delete H2 Area"
+                            >
+                              <Trash2 className="w-3 h-3" />
                             </button>
                           </div>
                         </div>
                         
                         <h4 className="text-xs font-bold text-white font-serif leading-snug">{area.title}</h4>
+                        {(() => {
+                          const parentVision = getH2Parent(area);
+                          return parentVision ? (
+                            <div className="text-[10px] text-indigo-400 flex items-center gap-1 font-medium truncate" title={`Parent Vision: ${parentVision.title}`}>
+                              <Eye className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate">{parentVision.title}</span>
+                            </div>
+                          ) : null;
+                        })()}
                         
-                        {/* Area Life Domain & Counts for Goals + Projects */}
+                        {/* Area Life Domain & Counts for Goals + Projects as interactive buttons */}
                         <div className="flex items-center justify-between text-[11px] pt-1 border-t border-[#222]">
-                          <span className="text-gray-400 font-medium truncate">{area.lifeDomain || 'General Area'}</span>
-                          <div className="flex items-center gap-1.5 font-mono text-[10px] font-bold shrink-0">
-                            <span className="px-2 py-0.5 rounded-md bg-sky-950/90 border border-sky-800/50 text-sky-300 flex items-center gap-1" title="H3 Goals under this Area">
-                              <Target className="w-2.5 h-2.5" />
-                              <span>{linkedGoals.length} {linkedGoals.length === 1 ? 'Goal' : 'Goals'}</span>
-                            </span>
-                            <span className="px-2 py-0.5 rounded-md bg-amber-950/90 border border-amber-800/50 text-amber-300 flex items-center gap-1" title="H1 Projects under this Area">
-                              <Briefcase className="w-2.5 h-2.5" />
-                              <span>{linkedProjects.length} {linkedProjects.length === 1 ? 'Proj' : 'Projs'}</span>
-                            </span>
+                          <span className="text-gray-400 font-medium truncate">{getHorizonItemDomain(area, horizonItems) || 'General Area'}</span>
+                          <div className="flex items-center gap-1.5 font-mono text-[10px] font-bold shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => onOpenAddModal(3, area.id)}
+                              className="group/btn px-1.5 py-0.5 rounded-md bg-sky-950/90 hover:bg-sky-900 border border-sky-800/50 hover:border-sky-600 text-sky-300 flex items-center gap-1 transition-all cursor-pointer"
+                              title="Add H3 Goal under this Area"
+                            >
+                              <Target className="w-2.5 h-2.5 shrink-0" />
+                              <span>{linkedGoals.length}</span>
+                              <span className="hidden group-hover/btn:inline text-[9px] font-sans font-medium transition-all">Goal</span>
+                              <Plus className="w-2.5 h-2.5 opacity-80 group-hover/btn:opacity-100 group-hover/btn:scale-110 transition-transform shrink-0" />
+                            </button>
+                            <button
+                              onClick={() => handleOpenAddProject(area.id, undefined)}
+                              className="group/btn px-1.5 py-0.5 rounded-md bg-amber-950/90 hover:bg-amber-900 border border-amber-800/50 hover:border-amber-600 text-amber-300 flex items-center gap-1 transition-all cursor-pointer"
+                              title="Add Project under this Area"
+                            >
+                              <Briefcase className="w-2.5 h-2.5 shrink-0" />
+                              <span>{linkedProjects.length}</span>
+                              <span className="hidden group-hover/btn:inline text-[9px] font-sans font-medium transition-all">Project</span>
+                              <Plus className="w-2.5 h-2.5 opacity-80 group-hover/btn:opacity-100 group-hover/btn:scale-110 transition-transform shrink-0" />
+                            </button>
                           </div>
                         </div>
 
@@ -2621,27 +2781,50 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                         )}
                         title={isSelected ? 'Click to unselect / show all' : 'Click to isolate and show only its children'}
                       >
-                        <div className="flex items-center justify-between text-[10px] font-bold text-sky-400 uppercase font-mono">
-                          <span className="flex items-center gap-1.5">
-                            {(isSelected || isHovered || isConnected) && <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />}
-                            <span>{isSelected ? '✓ Selected H3 Goal' : isConnected ? '🔗 Linked H3' : 'H3 Goal'}</span>
+                        <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-sky-400 uppercase font-mono">
+                          <span className="flex items-center gap-1.5 truncate">
+                            {(isSelected || isHovered || isConnected) && <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse shrink-0" />}
+                            <span className="truncate">{isSelected ? '✓ Selected H3 Goal' : isConnected ? '🔗 Linked H3' : 'H3 Goal'}</span>
                           </span>
-                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => onOpenEditModal(goal)} className="p-1 text-gray-400 hover:text-white rounded">
+                          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => onOpenEditModal(goal)}
+                              className="p-1 text-gray-400 hover:text-white rounded transition-colors cursor-pointer"
+                              title="Edit H3 Goal"
+                            >
                               <Edit3 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => onDeletePrompt(goal)}
+                              className="p-1 text-gray-400 hover:text-rose-400 rounded transition-colors cursor-pointer"
+                              title="Delete H3 Goal"
+                            >
+                              <Trash2 className="w-3 h-3" />
                             </button>
                           </div>
                         </div>
                         <h4 className="text-xs font-bold text-white font-serif leading-snug">{goal.title}</h4>
-                        {parentArea && (
-                          <div className="text-[10px] text-emerald-400 flex items-center gap-1 font-medium">
-                            <ShieldCheck className="w-2.5 h-2.5 shrink-0" />
-                            <span className="truncate">{parentArea.title}</span>
-                          </div>
-                        )}
-                        <div className="flex items-center justify-between text-[10px] text-gray-400 pt-1">
+                        {(() => {
+                          const parentArea = getH3Parent(goal);
+                          return parentArea ? (
+                            <div className="text-[10px] text-emerald-400 flex items-center gap-1 font-medium truncate" title={`Parent Area: ${parentArea.title}`}>
+                              <ShieldCheck className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate">{parentArea.title}</span>
+                            </div>
+                          ) : null;
+                        })()}
+                        <div className="flex items-center justify-between text-[10px] text-gray-400 pt-1 border-t border-[#222]" onClick={(e) => e.stopPropagation()}>
                           <span>{goal.targetDate || ''}</span>
-                          <span className="font-mono text-amber-400 font-bold">{goalProjects.length} {goalProjects.length === 1 ? 'Project' : 'Projects'}</span>
+                          <button
+                            onClick={() => handleOpenAddProject(goal.parentId, goal.id)}
+                            className="group/btn px-1.5 py-0.5 rounded-md bg-amber-950/90 hover:bg-amber-900 border border-amber-800/50 hover:border-amber-600 text-amber-300 font-mono text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                            title="Add Project under this Goal"
+                          >
+                            <Briefcase className="w-2.5 h-2.5 shrink-0" />
+                            <span>{goalProjects.length}</span>
+                            <span className="hidden group-hover/btn:inline text-[9px] font-sans font-medium transition-all">Project</span>
+                            <Plus className="w-2.5 h-2.5 opacity-80 group-hover/btn:opacity-100 group-hover/btn:scale-110 transition-transform shrink-0" />
+                          </button>
                         </div>
                         <div className="text-[10px] text-gray-500 pt-1 flex items-center justify-between border-t border-[#222]">
                           <span>{isSelected ? 'Showing linked projects' : 'Click to isolate children'}</span>
@@ -2669,9 +2852,9 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                   </div>
                 </div>
                 <button
-                  onClick={() => setQuickCaptureOpen(true)}
+                  onClick={() => handleOpenAddProject()}
                   className="p-1 text-gray-400 hover:text-amber-300 rounded cursor-pointer"
-                  title="Quick Capture Project / Action"
+                  title="Add New Project"
                 >
                   <Plus className="w-4 h-4" />
                 </button>
@@ -2707,20 +2890,47 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                         )}
                         title={isSelected ? 'Click to unselect / show all' : 'Click to isolate actions'}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
                             <Briefcase className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                             <h4 className="text-xs font-bold text-gray-200 truncate">
                               {proj.title}
                             </h4>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => setQuickActionInput({ projectId: proj.id, title: '' })}
+                              className="group/btn px-1.5 py-0.5 rounded-md bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-800/50 hover:border-emerald-600 text-emerald-300 font-mono text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                              title="Add Next Action to this Project"
+                            >
+                              <CheckCircle2 className="w-2.5 h-2.5 shrink-0" />
+                              <span>{projActions.length}</span>
+                              <span className="hidden group-hover/btn:inline text-[9px] font-sans font-medium transition-all">Action</span>
+                              <Plus className="w-2.5 h-2.5 opacity-80 group-hover/btn:opacity-100 group-hover/btn:scale-110 transition-transform shrink-0" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setProjectToEdit(proj);
+                                setProjectModalOpen(true);
+                              }}
+                              className="p-1 text-gray-400 hover:text-white rounded transition-colors cursor-pointer"
+                              title="Edit Project"
+                            >
+                              <Edit3 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => setProjectToDelete(proj)}
+                              className="p-1 text-gray-400 hover:text-rose-400 rounded transition-colors cursor-pointer"
+                              title="Delete Project"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
                             <button
                               onClick={() => {
                                 setSelectedProjectId(proj.id);
                                 setActiveTab('projects');
                               }}
-                              className="p-1 text-gray-400 hover:text-amber-300 rounded"
+                              className="p-1 text-gray-400 hover:text-amber-300 rounded transition-colors cursor-pointer"
                               title="Go to Project view"
                             >
                               <ArrowRight className="w-3.5 h-3.5" />
@@ -2728,7 +2938,56 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                           </div>
                         </div>
 
-                        {projActions.length > 0 && (
+                        {(() => {
+                          const parent = getProjectParent(proj);
+                          if (!parent) return null;
+                          if (parent.type === 'goal') {
+                            return (
+                              <div className="text-[10px] text-sky-400 flex items-center gap-1 font-medium truncate" title={`Parent Goal: ${parent.title}`}>
+                                <Target className="w-2.5 h-2.5 shrink-0" />
+                                <span className="truncate">{parent.title}</span>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="text-[10px] text-emerald-400 flex items-center gap-1 font-medium truncate" title={`Parent Area: ${parent.title}`}>
+                              <ShieldCheck className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate">{parent.title}</span>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Inline Quick Action Creation Input */}
+                        {quickActionInput?.projectId === proj.id && (
+                          <div className="mt-1.5 p-1.5 bg-[#181818] rounded-lg border border-emerald-800/40 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              autoFocus
+                              value={quickActionInput.title}
+                              onChange={(e) => setQuickActionInput({ projectId: proj.id, title: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleQuickAddAction(proj.id);
+                                if (e.key === 'Escape') setQuickActionInput(null);
+                              }}
+                              placeholder="Enter next physical action..."
+                              className="flex-1 px-2 py-1 bg-[#101010] border border-[#282828] rounded text-xs text-gray-200 placeholder-gray-500 focus:outline-hidden focus:border-emerald-400"
+                            />
+                            <button
+                              onClick={() => handleQuickAddAction(proj.id)}
+                              className="px-2 py-1 bg-emerald-500 hover:bg-emerald-600 text-black font-bold text-xs rounded transition-colors cursor-pointer"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setQuickActionInput(null)}
+                              className="px-1.5 py-1 text-gray-400 hover:text-gray-200 text-xs cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
+
+                        {projActions.length > 0 ? (
                           <div className="space-y-1 pt-1 border-t border-[#222]" onClick={(e) => e.stopPropagation()}>
                             {projActions.slice(0, 3).map((a) => (
                               <div key={a.id} className="text-[11px] text-gray-300 flex items-center justify-between gap-1.5 group/act">
@@ -2752,6 +3011,18 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                               <span className="text-[10px] text-gray-500 block">+{projActions.length - 3} more actions</span>
                             )}
                           </div>
+                        ) : (
+                          quickActionInput?.projectId !== proj.id && (
+                            <div className="pt-1 border-t border-[#1e1e1e] flex items-center justify-between text-[10px] text-gray-500" onClick={(e) => e.stopPropagation()}>
+                              <span>No actions yet</span>
+                              <button
+                                onClick={() => setQuickActionInput({ projectId: proj.id, title: '' })}
+                                className="text-emerald-400 hover:underline font-medium cursor-pointer"
+                              >
+                                + Add Next Action
+                              </button>
+                            </div>
+                          )
                         )}
                       </div>
                     );

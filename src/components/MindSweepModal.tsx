@@ -46,9 +46,6 @@ export const MindSweepModal: React.FC<MindSweepModalProps> = ({ isOpen, onClose 
         // Add new inbox item
         const newId = addAction({
           title: triggerText,
-          context: '@computer',
-          energy: 'medium',
-          timeEstimate: '15-30m',
           type: 'inbox',
           priority: 'medium',
         });
@@ -65,9 +62,6 @@ export const MindSweepModal: React.FC<MindSweepModalProps> = ({ isOpen, onClose 
 
     const newId = addAction({
       title: trimmed,
-      context: '@computer',
-      energy: 'medium',
-      timeEstimate: '15-30m',
       type: 'inbox',
       priority: 'medium',
     });

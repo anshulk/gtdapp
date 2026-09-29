@@ -42,6 +42,7 @@ const ACTION_HEADERS = [
   'CompletionHistory',
   'StreakCount',
   'BestStreak',
+  'Tags',
 ];
 
 const PROJECT_HEADERS = [
@@ -71,6 +72,9 @@ const HORIZON_HEADERS = [
   'KeyResults',
   'CreatedAt',
   'UpdatedAt',
+  'ProgressRating',
+  'ReviewNotes',
+  'LastReviewedAt',
 ];
 
 const REVIEW_HEADERS = [
@@ -83,9 +87,24 @@ const REVIEW_HEADERS = [
   'NewActionsCreated',
   'ReflectionNotes',
   'FocusAreas',
+  'HorizonRatings',
 ];
 
 const META_HEADERS = ['Key', 'Value', 'UpdatedAt'];
+
+/**
+ * Returns the Excel/Google Sheets column letter for a 1-based column index (e.g. 1 -> A, 22 -> V)
+ */
+export function getColumnLetter(colIndex: number): string {
+  let letter = '';
+  let temp = colIndex;
+  while (temp > 0) {
+    const mod = (temp - 1) % 26;
+    letter = String.fromCharCode(65 + mod) + letter;
+    temp = Math.floor((temp - mod) / 26);
+  }
+  return letter;
+}
 
 export class GoogleApiAuthError extends Error {
   isAuthError = true;
@@ -263,10 +282,10 @@ export async function setupGTDSheetsStructure(
       body: JSON.stringify({
         valueInputOption: 'USER_ENTERED',
         data: [
-          { range: 'Actions!A1:U1', values: [ACTION_HEADERS] },
-          { range: 'Projects!A1:L1', values: [PROJECT_HEADERS] },
-          { range: 'Horizons!A1:K1', values: [HORIZON_HEADERS] },
-          { range: 'Reviews!A1:I1', values: [REVIEW_HEADERS] },
+          { range: `Actions!A1:${getColumnLetter(ACTION_HEADERS.length)}1`, values: [ACTION_HEADERS] },
+          { range: `Projects!A1:${getColumnLetter(PROJECT_HEADERS.length)}1`, values: [PROJECT_HEADERS] },
+          { range: `Horizons!A1:${getColumnLetter(HORIZON_HEADERS.length)}1`, values: [HORIZON_HEADERS] },
+          { range: `Reviews!A1:${getColumnLetter(REVIEW_HEADERS.length)}1`, values: [REVIEW_HEADERS] },
           {
             range: 'Meta!A1:C5',
             values: [
@@ -304,11 +323,11 @@ export async function createNamedGTDSpreadsheet(
         title: sanitizedTitle,
       },
       sheets: [
-        { properties: { title: 'Actions', gridProperties: { frozenRowCount: 1 } } },
-        { properties: { title: 'Projects', gridProperties: { frozenRowCount: 1 } } },
-        { properties: { title: 'Horizons', gridProperties: { frozenRowCount: 1 } } },
-        { properties: { title: 'Reviews', gridProperties: { frozenRowCount: 1 } } },
-        { properties: { title: 'Meta', gridProperties: { frozenRowCount: 1 } } },
+        { properties: { title: 'Actions', gridProperties: { frozenRowCount: 1, columnCount: 26 } } },
+        { properties: { title: 'Projects', gridProperties: { frozenRowCount: 1, columnCount: 26 } } },
+        { properties: { title: 'Horizons', gridProperties: { frozenRowCount: 1, columnCount: 26 } } },
+        { properties: { title: 'Reviews', gridProperties: { frozenRowCount: 1, columnCount: 26 } } },
+        { properties: { title: 'Meta', gridProperties: { frozenRowCount: 1, columnCount: 26 } } },
       ],
     }),
   });
@@ -334,10 +353,10 @@ export async function createNamedGTDSpreadsheet(
       body: JSON.stringify({
         valueInputOption: 'USER_ENTERED',
         data: [
-          { range: 'Actions!A1:U1', values: [ACTION_HEADERS] },
-          { range: 'Projects!A1:L1', values: [PROJECT_HEADERS] },
-          { range: 'Horizons!A1:K1', values: [HORIZON_HEADERS] },
-          { range: 'Reviews!A1:I1', values: [REVIEW_HEADERS] },
+          { range: `Actions!A1:${getColumnLetter(ACTION_HEADERS.length)}1`, values: [ACTION_HEADERS] },
+          { range: `Projects!A1:${getColumnLetter(PROJECT_HEADERS.length)}1`, values: [PROJECT_HEADERS] },
+          { range: `Horizons!A1:${getColumnLetter(HORIZON_HEADERS.length)}1`, values: [HORIZON_HEADERS] },
+          { range: `Reviews!A1:${getColumnLetter(REVIEW_HEADERS.length)}1`, values: [REVIEW_HEADERS] },
           {
             range: 'Meta!A1:C5',
             values: [
@@ -443,12 +462,13 @@ export async function checkRemoteSheetMetadata(
 /**
  * Intelligent 3-way / multi-device dataset merger
  * Compares item timestamps (updatedAt, completedAt, createdAt) and field modifications
- * to resolve conflicts and merge bidirectional changes without data loss.
+ * to resolve conflicts and merge bidirectional changes without data loss across devices.
  */
 export function mergeGTDDatasets(
   local: GTDDataset,
   remote: GTDDataset,
-  lastSyncBaseline?: string | Date | null
+  lastSyncBaseline?: string | Date | null,
+  localTombstones?: Map<string, number> | Record<string, number>
 ): { 
   merged: GTDDataset; 
   changesCount: number;
@@ -459,12 +479,24 @@ export function mergeGTDDatasets(
   let remoteChangesCount = 0;
   let localChangesCount = 0;
 
-  // Sanitize local dataset so demo sample items never merge into remote user data
-  const safeLocal = sanitizeDatasetForSheet(local);
+  // Preserve full local dataset so user's active local workspace items and progress are never stripped
+  const safeLocal = local;
 
   // Helper to parse ISO date string to timestamp safely
   const toTime = (dateStr?: string) => (dateStr ? new Date(dateStr).getTime() : 0);
   const baselineTime = lastSyncBaseline ? new Date(lastSyncBaseline).getTime() : 0;
+
+  // Helper to check if an item was explicitly deleted on this device
+  const getTombstoneDeletedAt = (id: string): number | null => {
+    if (!localTombstones) return null;
+    if (localTombstones instanceof Map) {
+      return localTombstones.has(id) ? (localTombstones.get(id) || 0) : null;
+    }
+    if (typeof localTombstones === 'object' && id in localTombstones) {
+      return Number((localTombstones as Record<string, number>)[id]) || 0;
+    }
+    return null;
+  };
 
   // 1. Merge Actions
   const actionMap = new Map<string, GTDAction>();
@@ -481,16 +513,28 @@ export function mergeGTDDatasets(
       toTime(remoteA.completedAt),
       toTime(remoteA.createdAt)
     );
+    const tombstoneTime = getTombstoneDeletedAt(remoteA.id);
 
     if (!localA) {
-      // Exists in remote but not in local
-      // If we have no baseline or remote item was created/updated after last sync, add it
-      if (baselineTime === 0 || remoteFreshness > baselineTime) {
+      // Item exists on remote, but not in local state
+      if (tombstoneTime !== null) {
+        // This device explicitly deleted this item.
+        // If remote was modified AFTER this device's deletion, another device revived/updated it.
+        if (remoteFreshness > tombstoneTime) {
+          mergedActionsMap.set(remoteA.id, { ...remoteA });
+          changesCount++;
+          remoteChangesCount++;
+        } else {
+          // Deletion on this device stands; do not resurrect (will be pruned from sheet)
+          changesCount++;
+          localChangesCount++;
+        }
+      } else {
+        // Never deleted on this device: it's a valid remote item created on another device or sheet
         mergedActionsMap.set(remoteA.id, { ...remoteA });
         changesCount++;
         remoteChangesCount++;
       }
-      // If remoteFreshness <= baselineTime, the item was deleted locally since last sync, so don't resurrect
     } else {
       // Both exist: check timestamps and content differences
       const localFreshness = Math.max(
@@ -502,6 +546,7 @@ export function mergeGTDDatasets(
       const hasContentDiff =
         localA.title !== remoteA.title ||
         localA.type !== remoteA.type ||
+        JSON.stringify(localA.tags || []) !== JSON.stringify(remoteA.tags || []) ||
         localA.context !== remoteA.context ||
         localA.energy !== remoteA.energy ||
         localA.timeEstimate !== remoteA.timeEstimate ||
@@ -516,10 +561,12 @@ export function mergeGTDDatasets(
         (localA.streakCount || 0) !== (remoteA.streakCount || 0);
 
       if (remoteFreshness > localFreshness) {
+        // Remote is newer (updated on another device or sheet)
         mergedActionsMap.set(remoteA.id, { ...remoteA });
         changesCount++;
         remoteChangesCount++;
       } else if (localFreshness > remoteFreshness) {
+        // Local is newer (modified on this device while offline)
         mergedActionsMap.set(remoteA.id, { ...localA });
         changesCount++;
         localChangesCount++;
@@ -538,9 +585,16 @@ export function mergeGTDDatasets(
   // Preserve local actions that haven't synced to remote yet
   for (const localA of safeLocal.actions) {
     if (!mergedActionsMap.has(localA.id) && !remote.actions.some((r) => r.id === localA.id)) {
-      mergedActionsMap.set(localA.id, { ...localA });
-      changesCount++;
-      localChangesCount++;
+      const tombstoneTime = getTombstoneDeletedAt(localA.id);
+      if (tombstoneTime !== null) {
+        changesCount++;
+        localChangesCount++;
+      } else {
+        // Created locally or present locally: keep and ensure uploaded to remote
+        mergedActionsMap.set(localA.id, { ...localA });
+        changesCount++;
+        localChangesCount++;
+      }
     }
   }
 
@@ -559,9 +613,19 @@ export function mergeGTDDatasets(
       toTime(remoteP.completedAt),
       toTime(remoteP.createdAt)
     );
+    const tombstoneTime = getTombstoneDeletedAt(remoteP.id);
 
     if (!localP) {
-      if (baselineTime === 0 || remoteFreshness > baselineTime) {
+      if (tombstoneTime !== null) {
+        if (remoteFreshness > tombstoneTime) {
+          mergedProjectsMap.set(remoteP.id, { ...remoteP });
+          changesCount++;
+          remoteChangesCount++;
+        } else {
+          changesCount++;
+          localChangesCount++;
+        }
+      } else {
         mergedProjectsMap.set(remoteP.id, { ...remoteP });
         changesCount++;
         remoteChangesCount++;
@@ -603,9 +667,15 @@ export function mergeGTDDatasets(
 
   for (const localP of safeLocal.projects) {
     if (!mergedProjectsMap.has(localP.id) && !remote.projects.some((r) => r.id === localP.id)) {
-      mergedProjectsMap.set(localP.id, { ...localP });
-      changesCount++;
-      localChangesCount++;
+      const tombstoneTime = getTombstoneDeletedAt(localP.id);
+      if (tombstoneTime !== null) {
+        changesCount++;
+        localChangesCount++;
+      } else {
+        mergedProjectsMap.set(localP.id, { ...localP });
+        changesCount++;
+        localChangesCount++;
+      }
     }
   }
 
@@ -620,9 +690,19 @@ export function mergeGTDDatasets(
   for (const remoteH of remote.horizons) {
     const localH = horizonMap.get(remoteH.id);
     const remoteFreshness = Math.max(toTime(remoteH.updatedAt), toTime(remoteH.createdAt));
+    const tombstoneTime = getTombstoneDeletedAt(remoteH.id);
 
     if (!localH) {
-      if (baselineTime === 0 || remoteFreshness > baselineTime) {
+      if (tombstoneTime !== null) {
+        if (remoteFreshness > tombstoneTime) {
+          mergedHorizonsMap.set(remoteH.id, { ...remoteH });
+          changesCount++;
+          remoteChangesCount++;
+        } else {
+          changesCount++;
+          localChangesCount++;
+        }
+      } else {
         mergedHorizonsMap.set(remoteH.id, { ...remoteH });
         changesCount++;
         remoteChangesCount++;
@@ -636,7 +716,10 @@ export function mergeGTDDatasets(
         (localH.parentId || '') !== (remoteH.parentId || '') ||
         (localH.targetDate || '') !== (remoteH.targetDate || '') ||
         (localH.status || 'active') !== (remoteH.status || 'active') ||
-        (localH.description || '') !== (remoteH.description || '');
+        (localH.description || '') !== (remoteH.description || '') ||
+        (localH.progressRating || 0) !== (remoteH.progressRating || 0) ||
+        (localH.reviewNotes || '') !== (remoteH.reviewNotes || '') ||
+        (localH.lastReviewedAt || '') !== (remoteH.lastReviewedAt || '');
 
       if (remoteFreshness > localFreshness) {
         mergedHorizonsMap.set(remoteH.id, { ...remoteH });
@@ -658,9 +741,15 @@ export function mergeGTDDatasets(
 
   for (const localH of safeLocal.horizons) {
     if (!mergedHorizonsMap.has(localH.id) && !remote.horizons.some((r) => r.id === localH.id)) {
-      mergedHorizonsMap.set(localH.id, { ...localH });
-      changesCount++;
-      localChangesCount++;
+      const tombstoneTime = getTombstoneDeletedAt(localH.id);
+      if (tombstoneTime !== null) {
+        changesCount++;
+        localChangesCount++;
+      } else {
+        mergedHorizonsMap.set(localH.id, { ...localH });
+        changesCount++;
+        localChangesCount++;
+      }
     }
   }
 
@@ -670,6 +759,8 @@ export function mergeGTDDatasets(
     reviewMap.set(r.id, { ...r });
   }
   for (const remoteR of remote.reviews) {
+    const tombstoneTime = getTombstoneDeletedAt(remoteR.id);
+    if (tombstoneTime !== null) continue;
     if (!reviewMap.has(remoteR.id)) {
       reviewMap.set(remoteR.id, { ...remoteR });
       changesCount++;
@@ -677,7 +768,20 @@ export function mergeGTDDatasets(
     }
   }
 
-  const mergedReviews = Array.from(reviewMap.values()).sort(
+  const finalReviews: WeeklyReviewRecord[] = [];
+  for (const [id, rev] of reviewMap.entries()) {
+    const tombstoneTime = getTombstoneDeletedAt(id);
+    if (tombstoneTime !== null) continue;
+    const revTime = toTime(rev.completedAt);
+    if (!remote.reviews.some((r) => r.id === id)) {
+      if (baselineTime > 0 && revTime <= baselineTime) {
+        continue;
+      }
+    }
+    finalReviews.push(rev);
+  }
+
+  const mergedReviews = finalReviews.sort(
     (a, b) => toTime(b.completedAt) - toTime(a.completedAt)
   );
 
@@ -736,7 +840,16 @@ export async function fetchGTDDataFromSheet(
   if (actionsRows.length > 1) {
     for (let i = 1; i < actionsRows.length; i++) {
       const row = actionsRows[i];
-      if (!row || !row[0] || !row[1]) continue;
+      if (!row || row.length === 0) continue;
+      // Skip empty or blank rows
+      const hasContent = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim() !== '');
+      if (!hasContent) continue;
+
+      const title = row[1] ? String(row[1]).trim() : '';
+      if (!title) continue; // Must have a title
+
+      // If user typed directly into Google Sheet and left ID blank, assign a deterministic ID
+      const id = row[0] && String(row[0]).trim() !== '' ? String(row[0]).trim() : `act-sheet-${i}-${Date.now()}`;
 
       let isRecurring = String(row[16]).toLowerCase() === 'true' || String(row[16]) === '1';
       let recurrence: any = undefined;
@@ -756,10 +869,26 @@ export async function fetchGTDDataFromSheet(
         }
       }
 
+      let tags: string[] | undefined = undefined;
+      if (row[21]) {
+        try {
+          tags = typeof row[21] === 'string' ? JSON.parse(row[21]) : row[21];
+        } catch {
+          tags = String(row[21]).split(/[,;|]/).map((t) => t.trim()).filter(Boolean);
+        }
+      } else {
+        const legacy: string[] = [];
+        if (row[3]) legacy.push(String(row[3]));
+        if (row[4]) legacy.push(`${row[4]}-energy`);
+        if (row[5]) legacy.push(String(row[5]));
+        if (legacy.length > 0) tags = legacy;
+      }
+
       actions.push({
-        id: String(row[0]),
-        title: String(row[1]),
+        id,
+        title,
         type: (row[2] as any) || 'action',
+        tags,
         context: (row[3] as any) || '@computer',
         energy: (row[4] as any) || 'medium',
         timeEstimate: (row[5] as any) || '15-30m',
@@ -787,10 +916,18 @@ export async function fetchGTDDataFromSheet(
   if (projectsRows.length > 1) {
     for (let i = 1; i < projectsRows.length; i++) {
       const row = projectsRows[i];
-      if (!row || !row[0] || !row[1]) continue;
+      if (!row || row.length === 0) continue;
+      const hasContent = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim() !== '');
+      if (!hasContent) continue;
+
+      const title = row[1] ? String(row[1]).trim() : '';
+      if (!title) continue;
+
+      const id = row[0] && String(row[0]).trim() !== '' ? String(row[0]).trim() : `proj-sheet-${i}-${Date.now()}`;
+
       projects.push({
-        id: String(row[0]),
-        title: String(row[1]),
+        id,
+        title,
         desiredOutcome: String(row[2] || ''),
         status: (row[3] as any) || 'active',
         areaId: row[4] ? String(row[4]) : undefined,
@@ -810,7 +947,16 @@ export async function fetchGTDDataFromSheet(
   if (horizonsRows.length > 1) {
     for (let i = 1; i < horizonsRows.length; i++) {
       const row = horizonsRows[i];
-      if (!row || !row[0] || !row[2]) continue;
+      if (!row || row.length === 0) continue;
+      const hasContent = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim() !== '');
+      if (!hasContent) continue;
+
+      const title = row[2] ? String(row[2]).trim() : '';
+      if (!title) continue;
+
+      const level = (Number(row[1]) || 2) as any;
+      const id = row[0] && String(row[0]).trim() !== '' ? String(row[0]).trim() : `h${level}-sheet-${i}-${Date.now()}`;
+
       const keyResultsRaw = row[8];
       let keyResults: string[] | undefined;
       if (keyResultsRaw) {
@@ -822,9 +968,9 @@ export async function fetchGTDDataFromSheet(
       }
 
       horizons.push({
-        id: String(row[0]),
-        level: (Number(row[1]) || 2) as any,
-        title: String(row[2]),
+        id,
+        level,
+        title,
         lifeDomain: row[3] ? String(row[3]) : undefined,
         parentId: row[4] ? String(row[4]) : undefined,
         targetDate: row[5] ? String(row[5]) : undefined,
@@ -833,6 +979,9 @@ export async function fetchGTDDataFromSheet(
         keyResults,
         createdAt: row[9] ? String(row[9]) : new Date().toISOString(),
         updatedAt: row[10] ? String(row[10]) : undefined,
+        progressRating: row[11] !== undefined && row[11] !== '' ? Number(row[11]) : undefined,
+        reviewNotes: row[12] ? String(row[12]) : undefined,
+        lastReviewedAt: row[13] ? String(row[13]) : undefined,
       });
     }
   }
@@ -842,7 +991,11 @@ export async function fetchGTDDataFromSheet(
   if (reviewsRows.length > 1) {
     for (let i = 1; i < reviewsRows.length; i++) {
       const row = reviewsRows[i];
-      if (!row || !row[0]) continue;
+      if (!row || row.length === 0) continue;
+      const hasContent = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim() !== '');
+      if (!hasContent) continue;
+
+      const id = row[0] && String(row[0]).trim() !== '' ? String(row[0]).trim() : `rev-sheet-${i}-${Date.now()}`;
       const focusAreasRaw = row[8];
       let focusAreas: string[] | undefined;
       if (focusAreasRaw) {
@@ -851,6 +1004,14 @@ export async function fetchGTDDataFromSheet(
         } catch {
           focusAreas = String(focusAreasRaw).split(';').map((s) => s.trim()).filter(Boolean);
         }
+      }
+
+      const horizonRatingsRaw = row[9];
+      let horizonRatings: Record<string, { rating: number; notes?: string; status?: string }> | undefined;
+      if (horizonRatingsRaw) {
+        try {
+          horizonRatings = JSON.parse(horizonRatingsRaw);
+        } catch {}
       }
 
       reviews.push({
@@ -863,6 +1024,7 @@ export async function fetchGTDDataFromSheet(
         newActionsCreated: Number(row[6]) || 0,
         reflectionNotes: row[7] ? String(row[7]) : undefined,
         focusAreasForUpcomingWeek: focusAreas,
+        horizonRatings,
       });
     }
   }
@@ -912,6 +1074,7 @@ export function formatActionRow(a: GTDAction, now = new Date().toISOString()): (
     a.completionHistory ? JSON.stringify(a.completionHistory) : '',
     a.streakCount !== undefined ? a.streakCount : '',
     a.bestStreak !== undefined ? a.bestStreak : '',
+    a.tags ? JSON.stringify(a.tags) : '',
   ];
 }
 
@@ -945,6 +1108,9 @@ export function formatHorizonRow(h: HorizonItem, now = new Date().toISOString())
     h.keyResults ? JSON.stringify(h.keyResults) : '',
     h.createdAt || now,
     h.updatedAt || '',
+    h.progressRating ?? '',
+    h.reviewNotes || '',
+    h.lastReviewedAt || '',
   ];
 }
 
@@ -959,6 +1125,7 @@ export function formatReviewRow(r: WeeklyReviewRecord): (string | number | boole
     r.newActionsCreated || 0,
     r.reflectionNotes || '',
     r.focusAreasForUpcomingWeek ? JSON.stringify(r.focusAreasForUpcomingWeek) : '',
+    r.horizonRatings ? JSON.stringify(r.horizonRatings) : '',
   ];
 }
 
@@ -1031,11 +1198,16 @@ export async function saveGTDDataToSheet(
   }
 
   // 1. Fetch current raw sheet data to inspect existing rows and indices
+  const actionLastCol = getColumnLetter(ACTION_HEADERS.length); // 'V'
+  const projectLastCol = getColumnLetter(PROJECT_HEADERS.length); // 'L'
+  const horizonLastCol = getColumnLetter(HORIZON_HEADERS.length); // 'N'
+  const reviewLastCol = getColumnLetter(REVIEW_HEADERS.length); // 'J'
+
   const ranges = [
-    'Actions!A1:U2000',
-    'Projects!A1:L1000',
-    'Horizons!A1:K500',
-    'Reviews!A1:I500',
+    `Actions!A1:${actionLastCol}2000`,
+    `Projects!A1:${projectLastCol}1000`,
+    `Horizons!A1:${horizonLastCol}500`,
+    `Reviews!A1:${reviewLastCol}500`,
     'Meta!A1:C50',
   ];
   const fetchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${ranges
@@ -1055,77 +1227,45 @@ export async function saveGTDDataToSheet(
   const updateBatch: { range: string; values: (string | number | boolean)[][] }[] = [];
   const clearRanges: string[] = [];
 
-  // Helper to reconcile a tab item-wise
-  const reconcileTab = <T extends { id: string }>(
+  // Helper to write a tab cleanly and contiguously with NO blank rows
+  const writeContiguousTab = <T extends { id: string }>(
     tabName: string,
     headers: string[],
     existingRows: (string | number | boolean)[][],
     currentItems: T[],
     formatter: (item: T, timestamp: string) => (string | number | boolean)[],
-    lastColLetter: string
+    lastColLetter?: string
   ) => {
-    // Ensure header row exists
-    if (existingRows.length === 0 || !existingRows[0] || existingRows[0].length === 0) {
-      updateBatch.push({
-        range: `${tabName}!A1:${lastColLetter}1`,
-        values: [headers],
-      });
-    }
+    // 1. Build contiguous table rows: Row 1 = Headers, Rows 2..N+1 = Items
+    const formattedRows = currentItems.map((item) => formatter(item, now));
+    const allTableRows = [headers, ...formattedRows];
 
-    // Map existing rows: ID -> { rowIndex (1-based), rowValues }
-    const existingMap = new Map<string, { rowIndex: number; row: (string | number | boolean)[] }>();
-    for (let i = 1; i < existingRows.length; i++) {
-      const row = existingRows[i];
-      if (row && row[0] !== undefined && row[0] !== null && String(row[0]).trim() !== '') {
-        existingMap.set(String(row[0]).trim(), {
-          rowIndex: i + 1,
-          row,
-        });
-      }
-    }
+    // Compute max column count across headers and all rows to ensure range never truncates data
+    const maxColumns = Math.max(
+      headers.length,
+      ...allTableRows.map((r) => r.length)
+    );
+    const colLetter = lastColLetter && getColumnLetter(maxColumns) < lastColLetter ? lastColLetter : getColumnLetter(maxColumns);
 
-    let maxRowIndex = Math.max(1, existingRows.length);
-    const seenIds = new Set<string>();
+    // Always overwrite contiguously from row 1 downwards to ensure no blank holes exist
+    updateBatch.push({
+      range: `${tabName}!A1:${colLetter}${allTableRows.length}`,
+      values: allTableRows,
+    });
 
-    // Process current items (item-wise update or append)
-    for (const item of currentItems) {
-      const rowValues = formatter(item, now);
-      seenIds.add(item.id);
-
-      const existing = existingMap.get(item.id);
-      if (existing) {
-        // Item exists on sheet: compare content
-        if (!areRowValuesEqual(rowValues, existing.row)) {
-          // Update only this specific item row
-          updateBatch.push({
-            range: `${tabName}!A${existing.rowIndex}:${lastColLetter}${existing.rowIndex}`,
-            values: [rowValues],
-          });
-        }
-      } else {
-        // New item: append to the next available row
-        maxRowIndex++;
-        updateBatch.push({
-          range: `${tabName}!A${maxRowIndex}:${lastColLetter}${maxRowIndex}`,
-          values: [rowValues],
-        });
-      }
-    }
-
-    // Process deleted items: exist in sheet but no longer in current dataset
-    for (const [id, existing] of existingMap.entries()) {
-      if (!seenIds.has(id)) {
-        // Clear specifically this item's row without wiping the rest of the sheet
-        clearRanges.push(`${tabName}!A${existing.rowIndex}:${lastColLetter}${existing.rowIndex}`);
-      }
+    // 2. Clear any old rows beyond our contiguous table (e.g. leftover rows, gaps, previous blank rows)
+    const previousRowCount = existingRows.length;
+    const newRowCount = allTableRows.length;
+    if (previousRowCount > newRowCount) {
+      clearRanges.push(`${tabName}!A${newRowCount + 1}:${colLetter}${Math.max(previousRowCount + 50, 200)}`);
     }
   };
 
-  // 2. Item-wise reconcile each GTD entity type
-  reconcileTab('Actions', ACTION_HEADERS, actionsRows, safeData.actions, formatActionRow, 'U');
-  reconcileTab('Projects', PROJECT_HEADERS, projectsRows, safeData.projects, formatProjectRow, 'L');
-  reconcileTab('Horizons', HORIZON_HEADERS, horizonsRows, safeData.horizons, formatHorizonRow, 'K');
-  reconcileTab('Reviews', REVIEW_HEADERS, reviewsRows, safeData.reviews, formatReviewRow, 'I');
+  // 2. Contiguously write each GTD entity type (cleans up any existing blank rows)
+  writeContiguousTab('Actions', ACTION_HEADERS, actionsRows, safeData.actions, formatActionRow, actionLastCol);
+  writeContiguousTab('Projects', PROJECT_HEADERS, projectsRows, safeData.projects, formatProjectRow, projectLastCol);
+  writeContiguousTab('Horizons', HORIZON_HEADERS, horizonsRows, safeData.horizons, formatHorizonRow, horizonLastCol);
+  writeContiguousTab('Reviews', REVIEW_HEADERS, reviewsRows, safeData.reviews, formatReviewRow, reviewLastCol);
 
   // 3. Update Meta Tab
   const metaValues = [
@@ -1144,7 +1284,12 @@ export async function saveGTDDataToSheet(
     values: metaValues,
   });
 
-  // 4. Execute targeted clear for specifically deleted item rows (if any)
+  const metaRows: (string | number | boolean)[][] = valueRanges[4]?.values || [];
+  if (metaRows.length > metaValues.length) {
+    clearRanges.push(`Meta!A${metaValues.length + 1}:C${Math.max(metaRows.length + 10, 50)}`);
+  }
+
+  // 4. Clear trailing obsolete/blank rows first so there are no residual rows
   if (clearRanges.length > 0) {
     await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`,
@@ -1158,10 +1303,10 @@ export async function saveGTDDataToSheet(
           ranges: clearRanges,
         }),
       }
-    ).catch((e) => console.warn('Note on clearing deleted item rows:', e));
+    ).catch((e) => console.warn('Note on clearing trailing rows:', e));
   }
 
-  // 5. Execute targeted batch updates for modified/new rows only
+  // 5. Execute targeted batch updates for contiguous tables
   if (updateBatch.length > 0) {
     const updateRes = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
@@ -1179,7 +1324,7 @@ export async function saveGTDDataToSheet(
     );
 
     if (!updateRes.ok) {
-      await checkApiResponse(updateRes, 'update GTD data in Google Sheet item-wise');
+      await checkApiResponse(updateRes, 'update GTD data in Google Sheet contiguously');
     }
   }
 
@@ -1222,6 +1367,8 @@ export async function syncSingleActionItem(
       }
     }
 
+    const actionLastCol = getColumnLetter(ACTION_HEADERS.length);
+
     if (isDelete) {
       if (foundRowIndex > 0) {
         await fetch(
@@ -1233,17 +1380,18 @@ export async function syncSingleActionItem(
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              ranges: [`Actions!A${foundRowIndex}:U${foundRowIndex}`],
+              ranges: [`Actions!A${foundRowIndex}:${actionLastCol}${foundRowIndex}`],
             }),
           }
         );
       }
     } else {
       const rowValues = formatActionRow(action);
+      const rowMaxCol = getColumnLetter(Math.max(ACTION_HEADERS.length, rowValues.length));
       if (foundRowIndex > 0) {
         // Update existing row
         await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Actions!A${foundRowIndex}:U${foundRowIndex}?valueInputOption=USER_ENTERED`,
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Actions!A${foundRowIndex}:${rowMaxCol}${foundRowIndex}?valueInputOption=USER_ENTERED`,
           {
             method: 'PUT',
             headers: {
@@ -1258,7 +1406,7 @@ export async function syncSingleActionItem(
       } else {
         // Append new row
         await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Actions!A:U:append?valueInputOption=USER_ENTERED`,
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Actions!A:${rowMaxCol}:append?valueInputOption=USER_ENTERED`,
           {
             method: 'POST',
             headers: {
@@ -1430,7 +1578,7 @@ export async function syncSingleHorizonItem(
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              ranges: [`Horizons!A${foundRowIndex}:K${foundRowIndex}`],
+              ranges: [`Horizons!A${foundRowIndex}:N${foundRowIndex}`],
             }),
           }
         );
@@ -1439,7 +1587,7 @@ export async function syncSingleHorizonItem(
       const rowValues = formatHorizonRow(horizon);
       if (foundRowIndex > 0) {
         await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Horizons!A${foundRowIndex}:K${foundRowIndex}?valueInputOption=USER_ENTERED`,
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Horizons!A${foundRowIndex}:N${foundRowIndex}?valueInputOption=USER_ENTERED`,
           {
             method: 'PUT',
             headers: {
@@ -1453,7 +1601,7 @@ export async function syncSingleHorizonItem(
         );
       } else {
         await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Horizons!A:K:append?valueInputOption=USER_ENTERED`,
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Horizons!A:N:append?valueInputOption=USER_ENTERED`,
           {
             method: 'POST',
             headers: {

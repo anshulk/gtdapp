@@ -20,15 +20,12 @@ import {
 } from 'lucide-react';
 import {
   GTDAction,
-  GTDContext,
-  EnergyLevel,
-  TimeEstimate,
   ActionType,
   RecurrencePeriod,
 } from '../types/gtd';
 import { useGTD } from '../context/GTDContext';
-import { GTD_CONTEXT_OPTIONS } from '../data/gtdData';
 import { formatRecurrenceLabel, getActionStreakInfo } from '../utils/streakUtils';
+import { TagInput } from './TagInput';
 
 interface ActionEditModalProps {
   action: GTDAction | null;
@@ -41,15 +38,11 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const { projects = [], updateAction, deleteAction } = useGTD();
+  const { projects = [], allTags = [], updateAction, deleteAction } = useGTD();
 
   const [title, setTitle] = useState('');
   const [type, setType] = useState<ActionType>('action');
-  const [context, setContext] = useState<GTDContext>('@computer');
-  const [customContext, setCustomContext] = useState('');
-  const [isCustomContext, setIsCustomContext] = useState(false);
-  const [energy, setEnergy] = useState<EnergyLevel>('medium');
-  const [timeEstimate, setTimeEstimate] = useState<TimeEstimate>('15-30m');
+  const [tags, setTags] = useState<string[]>([]);
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
   const [projectId, setProjectId] = useState<string>('');
   const [dueDate, setDueDate] = useState('');
@@ -70,23 +63,16 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
       setTitle(action.title || '');
       setType(action.type || 'action');
       
-      const isKnownContext = GTD_CONTEXT_OPTIONS.some((c) => c.value === action.context);
-      if (isKnownContext) {
-        setContext(action.context);
-        setIsCustomContext(false);
-        setCustomContext('');
-      } else if (action.context) {
-        setContext('@custom');
-        setIsCustomContext(true);
-        setCustomContext(action.context);
+      if (action.tags && Array.isArray(action.tags)) {
+        setTags(action.tags);
       } else {
-        setContext('@computer');
-        setIsCustomContext(false);
-        setCustomContext('');
+        const legacy: string[] = [];
+        if (action.context) legacy.push(action.context);
+        if (action.energy) legacy.push(`${action.energy}-energy`);
+        if (action.timeEstimate) legacy.push(action.timeEstimate);
+        setTags(legacy);
       }
 
-      setEnergy(action.energy || 'medium');
-      setTimeEstimate(action.timeEstimate || '15-30m');
       setPriority(action.priority || 'medium');
       setProjectId(action.projectId || '');
       setDueDate(action.dueDate || '');
@@ -116,16 +102,10 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
     if (e) e.preventDefault();
     if (!title.trim()) return;
 
-    const resolvedContext = isCustomContext && customContext.trim() 
-      ? (customContext.startsWith('@') ? customContext.trim() : `@${customContext.trim()}`)
-      : context;
-
     updateAction(action.id, {
       title: title.trim(),
       type,
-      context: resolvedContext,
-      energy,
-      timeEstimate,
+      tags,
       priority,
       projectId: projectId || undefined,
       dueDate: dueDate || undefined,
@@ -143,7 +123,6 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
           }
         : undefined,
     });
-
     onClose();
   };
 
@@ -237,47 +216,9 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
             </div>
           </div>
 
-          {/* Context, Energy, Time, Priority Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            
-            {/* Context Selector */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Tag className="w-3.5 h-3.5 text-[#C5A47E]" />
-                <span>Physical Context</span>
-              </label>
-              <select
-                value={isCustomContext ? '@custom' : context}
-                onChange={(e) => {
-                  if (e.target.value === '@custom') {
-                    setIsCustomContext(true);
-                  } else {
-                    setIsCustomContext(false);
-                    setContext(e.target.value as GTDContext);
-                  }
-                }}
-                className="w-full px-3 py-2 text-xs bg-[#1A1A1A] border border-[#2D2D2D] rounded-xl text-gray-200 focus:outline-hidden focus:border-[#C5A47E]"
-              >
-                {GTD_CONTEXT_OPTIONS.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-                <option value="@custom">Custom Context...</option>
-              </select>
-
-              {isCustomContext && (
-                <input
-                  type="text"
-                  value={customContext}
-                  onChange={(e) => setCustomContext(e.target.value)}
-                  placeholder="e.g. @studio or @kitchen"
-                  className="mt-1.5 w-full px-3 py-1.5 text-xs bg-[#1A1A1A] border border-[#2D2D2D] rounded-lg text-gray-200 font-mono focus:outline-hidden focus:border-[#C5A47E]"
-                />
-              )}
-            </div>
-
-            {/* Project Link */}
+          {/* Project & Optional Tags */}
+          <div className="space-y-4">
+            {/* Associated Project */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Briefcase className="w-3.5 h-3.5 text-[#C5A47E]" />
@@ -297,53 +238,15 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
               </select>
             </div>
 
-            {/* Energy Level */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Zap className="w-3.5 h-3.5 text-[#C5A47E]" />
-                <span>Required Energy</span>
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { value: 'low' as EnergyLevel, label: 'Low', color: 'text-emerald-400' },
-                  { value: 'medium' as EnergyLevel, label: 'Medium', color: 'text-amber-400' },
-                  { value: 'high' as EnergyLevel, label: 'High', color: 'text-rose-400' },
-                ].map((e) => (
-                  <button
-                    key={e.value}
-                    type="button"
-                    onClick={() => setEnergy(e.value)}
-                    className={`py-1.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer ${
-                      energy === e.value
-                        ? 'bg-[#222222] border-[#C5A47E] text-white shadow-xs'
-                        : 'bg-[#181818] border-[#262626] text-gray-400 hover:text-gray-200'
-                    }`}
-                  >
-                    <span className={energy === e.value ? e.color : ''}>{e.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Time Estimate */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-[#C5A47E]" />
-                <span>Time Estimate</span>
-              </label>
-              <select
-                value={timeEstimate}
-                onChange={(e) => setTimeEstimate(e.target.value as TimeEstimate)}
-                className="w-full px-3 py-2 text-xs bg-[#1A1A1A] border border-[#2D2D2D] rounded-xl text-gray-200 focus:outline-hidden focus:border-[#C5A47E]"
-              >
-                <option value="<15m">⚡ Less than 15 mins</option>
-                <option value="15-30m">⏱ 15 - 30 mins</option>
-                <option value="30-60m">⏱ 30 - 60 mins</option>
-                <option value="1-2h">⏱ 1 - 2 hours</option>
-                <option value="2h+">⏱ 2+ hours</option>
-              </select>
-            </div>
-
+            {/* Multi-Tag Input */}
+            <TagInput
+              tags={tags}
+              onChange={setTags}
+              suggestedTags={allTags}
+              label="Action Tags (Optional)"
+              placeholder="Add tag (e.g. @computer, urgent, deep-work)..."
+              helpText="Optional: Add multiple tags to organize your actions by context, tool, energy, or topic."
+            />
           </div>
 
           {/* Priority & Due Date Row */}

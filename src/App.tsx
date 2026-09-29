@@ -1,5 +1,4 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
 import { GTDProvider, useGTD } from './context/GTDContext';
 import { Navbar } from './components/Navbar';
 import { DashboardView } from './components/DashboardView';
@@ -78,23 +77,15 @@ const MainAppContent: React.FC = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-8 pb-28 md:pb-12">
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.16, ease: 'easeOut' }}
-          >
-            {activeTab === 'dashboard' && <DashboardView />}
-            {activeTab === 'horizons' && <HorizonsView />}
-            {activeTab === 'projects' && <ProjectsView />}
-            {(activeTab === 'actions' || activeTab === 'inbox' || activeTab === 'waiting' || activeTab === 'someday') && (
-              <NextActionsView initialSubTab={activeTab === 'actions' ? 'actions' : activeTab} />
-            )}
-            {activeTab === 'reviews' && <ReviewsView />}
-          </motion.div>
-        </AnimatePresence>
+        <div key={activeTab} className="animate-fadeIn">
+          {activeTab === 'dashboard' && <DashboardView />}
+          {activeTab === 'horizons' && <HorizonsView />}
+          {activeTab === 'projects' && <ProjectsView />}
+          {(activeTab === 'actions' || activeTab === 'inbox' || activeTab === 'waiting' || activeTab === 'someday') && (
+            <NextActionsView initialSubTab={activeTab === 'actions' ? 'actions' : activeTab} />
+          )}
+          {activeTab === 'reviews' && <ReviewsView />}
+        </div>
       </main>
 
       {/* Mobile-Only Bottom Navigation Bar (Clean, clutter-free, thumb-accessible) */}
@@ -140,7 +131,10 @@ const MainAppContent: React.FC = () => {
           <Briefcase className={`w-5 h-5 mb-0.5 ${activeTab === 'projects' ? 'text-[#C5A47E]' : 'text-gray-400'}`} />
           <span>Projects</span>
           {stalledProjects.length > 0 && (
-            <span className="absolute top-0.5 right-3 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-[#0F0F0F]" />
+            <span
+              className="absolute top-0.5 right-3 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-[#0F0F0F]"
+              title={`${stalledProjects.length} stalled project${stalledProjects.length === 1 ? '' : 's'} without a next action`}
+            />
           )}
         </button>
 
