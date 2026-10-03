@@ -106,6 +106,7 @@ export interface GTDAction {
   id: string;
   title: string;
   projectId?: string; // Link to Horizon 1 (Project)
+  lifeDomain?: string; // Optional Life Domain for standalone actions or explicit overrides
   tags?: string[]; // Optional tags with multiple tags allowed
   context?: GTDContext; // Legacy compatibility
   energy?: EnergyLevel; // Legacy compatibility

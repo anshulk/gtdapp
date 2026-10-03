@@ -85,14 +85,18 @@ export function getHorizonItemDomain(
     return item.lifeDomain || undefined;
   }
 
+  // If item has direct lifeDomain specified (e.g. H2, H3, H5)
+  if (item.lifeDomain) {
+    return item.lifeDomain;
+  }
+
   // Find ancestor H4 Vision
   const ancestorH4 = getAncestorH4(item, allHorizons);
   if (ancestorH4?.lifeDomain) {
     return ancestorH4.lifeDomain;
   }
 
-  // Fallback if item had legacy domain stored
-  return item.lifeDomain || undefined;
+  return undefined;
 }
 
 /**

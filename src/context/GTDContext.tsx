@@ -29,6 +29,7 @@ import {
   INITIAL_ACTIONS, 
   INITIAL_REVIEWS 
 } from '../data/gtdData';
+import { isInitialSampleDataset } from '../utils/sampleDataGuard';
 import { 
   GoogleUser, 
   getStoredGoogleUser, 
@@ -196,6 +197,7 @@ interface GTDContextType {
 }
 
 const LOCAL_STORAGE_KEY_PREFIX = 'gtd_hub_state_v2';
+const SAMPLE_TEMPLATE_VERSION = 'v3_horizons_domains_aligned';
 const CROSS_TAB_CHANNEL_NAME = 'gtd_cross_tab_sync_channel';
 
 export const normalizeActions = (rawActions: any[]): GTDAction[] => {
@@ -297,54 +299,64 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setSyncConflictNotice(null);
   };
 
-  // Load partitioned state
-  const [horizonItems, setHorizonItems] = useState<HorizonItem[]>(() => {
+  // Load partitioned state with sample template upgrade if untouched
+  const initialData = useMemo(() => {
     try {
       const initialKey = user?.email 
         ? `${LOCAL_STORAGE_KEY_PREFIX}_user_${encodeURIComponent(user.email)}`
         : `${LOCAL_STORAGE_KEY_PREFIX}_guest`;
-      const saved = localStorage.getItem(`${initialKey}_horizons`);
-      return saved ? JSON.parse(saved) : INITIAL_HORIZON_ITEMS;
-    } catch {
-      return INITIAL_HORIZON_ITEMS;
-    }
-  });
+      const savedH = localStorage.getItem(`${initialKey}_horizons`);
+      const savedP = localStorage.getItem(`${initialKey}_projects`);
+      const savedA = localStorage.getItem(`${initialKey}_actions`);
+      const savedR = localStorage.getItem(`${initialKey}_reviews`);
+      const templateVer = localStorage.getItem(`${initialKey}_template_v`);
 
-  const [projects, setProjects] = useState<GTDProject[]>(() => {
-    try {
-      const initialKey = user?.email 
-        ? `${LOCAL_STORAGE_KEY_PREFIX}_user_${encodeURIComponent(user.email)}`
-        : `${LOCAL_STORAGE_KEY_PREFIX}_guest`;
-      const saved = localStorage.getItem(`${initialKey}_projects`);
-      return saved ? JSON.parse(saved) : INITIAL_PROJECTS;
-    } catch {
-      return INITIAL_PROJECTS;
-    }
-  });
+      if (savedH && savedP && savedA) {
+        const parsedH = JSON.parse(savedH);
+        const parsedP = JSON.parse(savedP);
+        const parsedA = normalizeActions(JSON.parse(savedA));
+        const parsedR = savedR ? JSON.parse(savedR) : INITIAL_REVIEWS;
 
-  const [actions, setActions] = useState<GTDAction[]>(() => {
-    try {
-      const initialKey = user?.email 
-        ? `${LOCAL_STORAGE_KEY_PREFIX}_user_${encodeURIComponent(user.email)}`
-        : `${LOCAL_STORAGE_KEY_PREFIX}_guest`;
-      const saved = localStorage.getItem(`${initialKey}_actions`);
-      return saved ? normalizeActions(JSON.parse(saved)) : INITIAL_ACTIONS;
-    } catch {
-      return INITIAL_ACTIONS;
-    }
-  });
+        // If dataset is purely initial sample items and template version is not current, upgrade
+        if (templateVer !== SAMPLE_TEMPLATE_VERSION && isInitialSampleDataset({ actions: parsedA, projects: parsedP, horizons: parsedH })) {
+          localStorage.setItem(`${initialKey}_template_v`, SAMPLE_TEMPLATE_VERSION);
+          return {
+            horizons: INITIAL_HORIZON_ITEMS,
+            projects: INITIAL_PROJECTS,
+            actions: INITIAL_ACTIONS,
+            reviews: INITIAL_REVIEWS,
+          };
+        }
 
-  const [reviews, setReviews] = useState<WeeklyReviewRecord[]>(() => {
-    try {
-      const initialKey = user?.email 
-        ? `${LOCAL_STORAGE_KEY_PREFIX}_user_${encodeURIComponent(user.email)}`
-        : `${LOCAL_STORAGE_KEY_PREFIX}_guest`;
-      const saved = localStorage.getItem(`${initialKey}_reviews`);
-      return saved ? JSON.parse(saved) : INITIAL_REVIEWS;
+        return {
+          horizons: parsedH,
+          projects: parsedP,
+          actions: parsedA,
+          reviews: parsedR,
+        };
+      }
+
+      localStorage.setItem(`${initialKey}_template_v`, SAMPLE_TEMPLATE_VERSION);
+      return {
+        horizons: savedH ? JSON.parse(savedH) : INITIAL_HORIZON_ITEMS,
+        projects: savedP ? JSON.parse(savedP) : INITIAL_PROJECTS,
+        actions: savedA ? normalizeActions(JSON.parse(savedA)) : INITIAL_ACTIONS,
+        reviews: savedR ? JSON.parse(savedR) : INITIAL_REVIEWS,
+      };
     } catch {
-      return INITIAL_REVIEWS;
+      return {
+        horizons: INITIAL_HORIZON_ITEMS,
+        projects: INITIAL_PROJECTS,
+        actions: INITIAL_ACTIONS,
+        reviews: INITIAL_REVIEWS,
+      };
     }
-  });
+  }, [user?.email]);
+
+  const [horizonItems, setHorizonItems] = useState<HorizonItem[]>(initialData.horizons);
+  const [projects, setProjects] = useState<GTDProject[]>(initialData.projects);
+  const [actions, setActions] = useState<GTDAction[]>(initialData.actions);
+  const [reviews, setReviews] = useState<WeeklyReviewRecord[]>(initialData.reviews);
 
   // UI state
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -1816,6 +1828,7 @@ export const GTDProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     localStorage.removeItem(`${storageKey}_projects`);
     localStorage.removeItem(`${storageKey}_actions`);
     localStorage.removeItem(`${storageKey}_reviews`);
+    localStorage.setItem(`${storageKey}_template_v`, SAMPLE_TEMPLATE_VERSION);
     syncImmediateLocalChange({
       horizons: INITIAL_HORIZON_ITEMS,
       projects: INITIAL_PROJECTS,

@@ -3,16 +3,20 @@ import { GTDDataset } from '../services/googleSheets';
 
 const SAMPLE_ACTION_IDS = new Set([
   'act-1', 'act-2', 'act-3', 'act-4', 'act-5', 'act-6', 'act-7', 'act-8', 'act-9',
-  'act-10', 'act-11', 'act-12', 'act-13', 'act-14', 'act-15', 'act-16', 'act-17', 'act-18'
+  'act-10', 'act-11', 'act-12', 'act-13', 'act-14', 'act-15', 'act-16', 'act-17', 'act-18',
+  'act-rec-1', 'act-rec-2', 'act-wf-1', 'act-wf-2', 'act-wf-3',
+  'act-inbox-1', 'act-inbox-2', 'act-inbox-3', 'act-sm-1', 'act-sm-2', 'act-sm-3'
 ]);
 
 const SAMPLE_PROJECT_IDS = new Set([
-  'proj-1', 'proj-2', 'proj-3', 'proj-4', 'proj-5', 'proj-6'
+  'proj-1', 'proj-2', 'proj-3', 'proj-4', 'proj-5', 'proj-6', 'proj-7', 'proj-8', 'proj-9'
 ]);
 
 const SAMPLE_HORIZON_IDS = new Set([
-  'h5-1', 'h5-2', 'h4-1', 'h4-2', 'h4-3', 'h3-1', 'h3-2', 'h3-3',
-  'h2-1', 'h2-2', 'h2-3', 'h2-4', 'h2-5'
+  'h5-1', 'h5-2',
+  'h4-1', 'h4-2', 'h4-3', 'h4-4', 'h4-5', 'h4-6', 'h4-7',
+  'h3-1', 'h3-2', 'h3-3', 'h3-4', 'h3-5', 'h3-6', 'h3-7',
+  'h2-1', 'h2-2', 'h2-3', 'h2-4', 'h2-5', 'h2-6', 'h2-7'
 ]);
 
 const SAMPLE_REVIEW_IDS = new Set(['rev-1', 'rev-2']);
