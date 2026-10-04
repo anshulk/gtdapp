@@ -13,6 +13,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import { trackButtonClick } from '../services/analytics';
 
 interface PWAInstallModalProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ export const PWAInstallModal: React.FC<PWAInstallModalProps> = ({ isOpen, onClos
   if (!mounted || !isOpen) return null;
 
   const handleInstallClick = async () => {
+    trackButtonClick('pwa_install_proceed', 'pwa_install_modal');
     const success = await installApp();
     if (success) {
       onClose();
@@ -40,7 +42,10 @@ export const PWAInstallModal: React.FC<PWAInstallModalProps> = ({ isOpen, onClos
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 overflow-y-auto bg-black/85 backdrop-blur-md animate-fadeIn"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) {
+          trackButtonClick('pwa_install_backdrop_close', 'pwa_install_modal');
+          onClose();
+        }
       }}
     >
       {/* Modal Container */}
@@ -50,7 +55,10 @@ export const PWAInstallModal: React.FC<PWAInstallModalProps> = ({ isOpen, onClos
           {/* Header Banner */}
           <div className="relative px-6 pt-6 pb-5 bg-gradient-to-b from-[#1C1814] to-[#141414] border-b border-[#262626]">
             <button
-              onClick={onClose}
+              onClick={() => {
+                trackButtonClick('pwa_install_close', 'pwa_install_modal');
+                onClose();
+              }}
               className="absolute right-4 top-4 p-2 text-gray-400 hover:text-white hover:bg-[#222] rounded-lg transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
@@ -161,7 +169,10 @@ export const PWAInstallModal: React.FC<PWAInstallModalProps> = ({ isOpen, onClos
           {/* Action Buttons */}
           <div className="px-6 py-4 bg-[#111111] border-t border-[#262626] flex items-center justify-end gap-3">
             <button
-              onClick={onClose}
+              onClick={() => {
+                trackButtonClick('pwa_install_footer_close', 'pwa_install_modal');
+                onClose();
+              }}
               className="px-4 py-2 text-xs font-semibold text-gray-400 hover:text-white rounded-lg hover:bg-[#1A1A1A] transition-colors cursor-pointer"
             >
               Close

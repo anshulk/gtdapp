@@ -20,6 +20,7 @@ import {
 import { useGTD } from '../context/GTDContext';
 import { WeeklyReviewRecord } from '../types/gtd';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { trackButtonClick } from '../services/analytics';
 
 export const ReviewsView: React.FC = () => {
   const {
@@ -56,7 +57,10 @@ export const ReviewsView: React.FC = () => {
           </div>
 
           <button
-            onClick={() => setWeeklyReviewOpen(true)}
+            onClick={() => {
+              trackButtonClick('reviews_launch_guided_review', 'reviews_header');
+              setWeeklyReviewOpen(true);
+            }}
             className="px-3 py-1.5 bg-[#C5A47E] hover:bg-[#b8946e] active:bg-[#a8845e] text-black text-xs font-bold rounded-lg shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
           >
             <Sparkles className="w-3.5 h-3.5" />
@@ -214,7 +218,10 @@ export const ReviewsView: React.FC = () => {
                         {review.nextActionsReviewed} Actions Refined
                       </span>
                       <button
-                        onClick={() => setReviewToDelete(review)}
+                        onClick={() => {
+                          trackButtonClick('reviews_prompt_delete', 'reviews_history_list', { review_id: review.id });
+                          setReviewToDelete(review);
+                        }}
                         className="p-1.5 text-gray-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer ml-1"
                         title="Delete Review Record"
                       >

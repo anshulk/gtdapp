@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Compass, 
   Eye, 
@@ -29,6 +29,7 @@ import { getHorizonItemDomain } from '../utils/domainHierarchy';
 import { HorizonItemModal } from './HorizonItemModal';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { HorizonsMap } from './HorizonsMap';
+import { trackButtonClick, trackFilterChange, trackSubView } from '../services/analytics';
 
 export const HorizonsView: React.FC = () => {
   const {
@@ -51,7 +52,17 @@ export const HorizonsView: React.FC = () => {
   const [defaultParentIdForNew, setDefaultParentIdForNew] = useState<string | undefined>(undefined);
   const [viewMode, setViewMode] = useState<'graph' | 'kanban' | 'cards'>('graph');
 
+  // Track sub-view engagement
+  useEffect(() => {
+    trackSubView('horizons', viewMode, {
+      selected_altitude: selectedAltitude,
+      selected_domain: selectedLifeDomain,
+      total_items: horizonItems.length,
+    });
+  }, [viewMode]);
+
   const handleOpenAddModal = (level: HorizonLevel = 3, parentId?: string) => {
+    trackButtonClick('horizons_add_focus_button', 'horizons_header', { level, parent_id: parentId });
     setItemToEdit(null);
     setDefaultLevelForNew(level);
     setDefaultParentIdForNew(parentId);
@@ -59,11 +70,13 @@ export const HorizonsView: React.FC = () => {
   };
 
   const handleOpenEditModal = (item: HorizonItem) => {
+    trackButtonClick('horizons_edit_focus_button', 'horizons_item', { item_id: item.id, level: item.level });
     setItemToEdit(item);
     setModalOpen(true);
   };
 
   const handleDeletePrompt = (item: HorizonItem) => {
+    trackButtonClick('horizons_delete_focus_prompt', 'horizons_item', { item_id: item.id, level: item.level });
     setItemToDelete(item);
   };
 
@@ -111,7 +124,10 @@ export const HorizonsView: React.FC = () => {
             {/* View Mode Toggle */}
             <div className="bg-[#1E1E1E] border border-[#262626] p-0.5 rounded-lg flex items-center gap-1 text-xs font-semibold">
               <button
-                onClick={() => setViewMode('graph')}
+                onClick={() => {
+                  trackButtonClick('horizons_view_mode_graph', 'horizons_header');
+                  setViewMode('graph');
+                }}
                 className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
                   viewMode === 'graph'
                     ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
@@ -122,7 +138,10 @@ export const HorizonsView: React.FC = () => {
                 <span>Graph</span>
               </button>
               <button
-                onClick={() => setViewMode('kanban')}
+                onClick={() => {
+                  trackButtonClick('horizons_view_mode_kanban', 'horizons_header');
+                  setViewMode('kanban');
+                }}
                 className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
                   viewMode === 'kanban'
                     ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
@@ -133,7 +152,10 @@ export const HorizonsView: React.FC = () => {
                 <span>Kanban</span>
               </button>
               <button
-                onClick={() => setViewMode('cards')}
+                onClick={() => {
+                  trackButtonClick('horizons_view_mode_cards', 'horizons_header');
+                  setViewMode('cards');
+                }}
                 className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
                   viewMode === 'cards'
                     ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
@@ -164,7 +186,11 @@ export const HorizonsView: React.FC = () => {
                 Altitude:
               </span>
               <button
-                onClick={() => setSelectedAltitude('all')}
+                onClick={() => {
+                  trackButtonClick('horizons_altitude_all', 'horizons_cards_filter');
+                  trackFilterChange('altitude', 'all', 'horizons');
+                  setSelectedAltitude('all');
+                }}
                 className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
                   selectedAltitude === 'all'
                     ? 'bg-[#C5A47E] text-black shadow-xs'
@@ -181,7 +207,11 @@ export const HorizonsView: React.FC = () => {
                 return (
                   <button
                     key={lvl}
-                    onClick={() => setSelectedAltitude(lvl)}
+                    onClick={() => {
+                      trackButtonClick(`horizons_altitude_h${lvl}`, 'horizons_cards_filter', { level: lvl });
+                      trackFilterChange('altitude', `H${lvl}`, 'horizons');
+                      setSelectedAltitude(lvl);
+                    }}
                     className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                       isSelected
                         ? `${def.color.badge} shadow-xs font-extrabold`
@@ -203,7 +233,10 @@ export const HorizonsView: React.FC = () => {
               </span>
               <select
                 value={selectedLifeDomain}
-                onChange={(e) => setSelectedLifeDomain(e.target.value)}
+                onChange={(e) => {
+                  trackFilterChange('domain', e.target.value, 'horizons');
+                  setSelectedLifeDomain(e.target.value);
+                }}
                 className="px-3 py-1.5 bg-[#181818] border border-[#262626] rounded-xl text-xs text-gray-200 focus:outline-hidden focus:border-[#C5A47E]"
               >
                 <option value="all">All Life Domains</option>

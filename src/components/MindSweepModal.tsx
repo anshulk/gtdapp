@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Brain, Plus, Sparkles, Check, ArrowRight } from 'lucide-react';
 import { useGTD } from '../context/GTDContext';
 import { MIND_SWEEP_TRIGGERS } from '../data/gtdData';
+import { trackButtonClick, trackFilterChange } from '../services/analytics';
 
 interface MindSweepModalProps {
   isOpen: boolean;
@@ -19,9 +20,11 @@ export const MindSweepModal: React.FC<MindSweepModalProps> = ({ isOpen, onClose 
   // Toggle trigger selection: if already added, remove it; if not added, add it
   const handleToggleTrigger = (triggerText: string) => {
     const existingActionId = addedTriggerMap[triggerText];
+    const categoryName = MIND_SWEEP_TRIGGERS[activeCategory]?.title || 'Unknown';
 
     if (existingActionId) {
       // Remove from GTD inbox actions
+      trackButtonClick('mind_sweep_unselect_trigger', 'mind_sweep_modal', { trigger: triggerText, category: categoryName });
       deleteAction(existingActionId);
       setAddedTriggerMap((prev) => {
         const next = { ...prev };
@@ -36,6 +39,7 @@ export const MindSweepModal: React.FC<MindSweepModalProps> = ({ isOpen, onClose 
 
       if (matchingExisting) {
         // Toggle off if matching inbox item already exists
+        trackButtonClick('mind_sweep_unselect_trigger', 'mind_sweep_modal', { trigger: triggerText, category: categoryName });
         deleteAction(matchingExisting.id);
         setAddedTriggerMap((prev) => {
           const next = { ...prev };
@@ -44,6 +48,7 @@ export const MindSweepModal: React.FC<MindSweepModalProps> = ({ isOpen, onClose 
         });
       } else {
         // Add new inbox item
+        trackButtonClick('mind_sweep_select_trigger', 'mind_sweep_modal', { trigger: triggerText, category: categoryName });
         const newId = addAction({
           title: triggerText,
           type: 'inbox',
@@ -59,6 +64,8 @@ export const MindSweepModal: React.FC<MindSweepModalProps> = ({ isOpen, onClose 
     e.preventDefault();
     const trimmed = customInput.trim();
     if (!trimmed) return;
+
+    trackButtonClick('mind_sweep_custom_capture', 'mind_sweep_modal', { length: trimmed.length });
 
     const newId = addAction({
       title: trimmed,
@@ -100,7 +107,10 @@ export const MindSweepModal: React.FC<MindSweepModalProps> = ({ isOpen, onClose 
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              trackButtonClick('mind_sweep_close', 'mind_sweep_modal', { swept_count: capturedCount });
+              onClose();
+            }}
             className="p-2 text-gray-400 hover:text-white hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -133,7 +143,11 @@ export const MindSweepModal: React.FC<MindSweepModalProps> = ({ isOpen, onClose 
               {MIND_SWEEP_TRIGGERS.map((cat, idx) => (
                 <button
                   key={idx}
-                  onClick={() => setActiveCategory(idx)}
+                  onClick={() => {
+                    trackFilterChange('mind_sweep_category', cat.title, 'mind_sweep_modal');
+                    trackButtonClick('mind_sweep_category_tab', 'mind_sweep_modal', { category: cat.title });
+                    setActiveCategory(idx);
+                  }}
                   className={`px-3 py-1.5 rounded-xl font-bold transition-all whitespace-nowrap cursor-pointer ${
                     activeCategory === idx
                       ? 'bg-[#C5A47E] text-black shadow-xs'
@@ -188,7 +202,10 @@ export const MindSweepModal: React.FC<MindSweepModalProps> = ({ isOpen, onClose 
             Items added will be placed in your GTD Inbox ready for clarifying.
           </span>
           <button
-            onClick={onClose}
+            onClick={() => {
+              trackButtonClick('mind_sweep_done', 'mind_sweep_modal', { swept_count: capturedCount });
+              onClose();
+            }}
             className="px-5 py-2 bg-[#C5A47E] text-black rounded-xl font-bold shadow-xs hover:bg-[#b8946e] cursor-pointer transition-colors"
           >
             Done Sweeping

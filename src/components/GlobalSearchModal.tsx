@@ -28,6 +28,7 @@ import {
 import { useGTD } from '../context/GTDContext';
 import { GTDAction, GTDProject, HorizonItem, ActiveTab } from '../types/gtd';
 import { getHorizonItemDomain, getProjectInheritedDomain } from '../utils/domainHierarchy';
+import { trackButtonClick, trackFilterChange } from '../services/analytics';
 
 type SearchCategory = 'all' | 'actions' | 'projects' | 'horizons' | 'waiting' | 'inbox' | 'someday';
 
@@ -288,6 +289,7 @@ export const GlobalSearchModal: React.FC = () => {
         handleSelectItem(searchResults[selectedIndex]);
       } else if (searchQuery.trim()) {
         // Quick Capture with current query
+        trackButtonClick('search_trigger_quick_capture', 'global_search_modal', { query: searchQuery.trim() });
         setQuickCaptureOpen(true);
         setSearchModalOpen(false);
       }
@@ -303,6 +305,11 @@ export const GlobalSearchModal: React.FC = () => {
   };
 
   const handleSelectItem = (item: SearchResultItem) => {
+    trackButtonClick('search_select_result', 'global_search_modal', {
+      category: item.category,
+      item_id: item.id,
+      item_title: item.title,
+    });
     setActiveTab(item.targetTab);
     
     if (item.category === 'project') {
@@ -369,6 +376,7 @@ export const GlobalSearchModal: React.FC = () => {
           {searchQuery && (
             <button
               onClick={() => {
+                trackButtonClick('search_clear_query', 'global_search_modal');
                 setSearchQuery('');
                 inputRef.current?.focus();
               }}
@@ -386,7 +394,10 @@ export const GlobalSearchModal: React.FC = () => {
           </div>
 
           <button
-            onClick={() => setSearchModalOpen(false)}
+            onClick={() => {
+              trackButtonClick('search_close', 'global_search_modal');
+              setSearchModalOpen(false);
+            }}
             className="sm:hidden p-1.5 text-gray-400 hover:text-white rounded-lg cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -413,7 +424,11 @@ export const GlobalSearchModal: React.FC = () => {
             return (
               <button
                 key={cat.id}
-                onClick={() => setActiveCategory(cat.id)}
+                onClick={() => {
+                  trackFilterChange('search_category', cat.id, 'global_search_modal');
+                  trackButtonClick('search_category_chip', 'global_search_modal', { category: cat.id });
+                  setActiveCategory(cat.id);
+                }}
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
                   isActive
                     ? 'bg-[#C5A47E] text-black font-semibold shadow-xs'
@@ -454,6 +469,10 @@ export const GlobalSearchModal: React.FC = () => {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
+                          trackButtonClick('search_toggle_action_complete', 'global_search_modal', {
+                            action_id: actionData.id,
+                            completed: !actionData.completed,
+                          });
                           toggleActionComplete(actionData.id);
                         }}
                         className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
@@ -519,6 +538,7 @@ export const GlobalSearchModal: React.FC = () => {
                 <div className="pt-2">
                   <button
                     onClick={() => {
+                      trackButtonClick('search_empty_quick_capture', 'global_search_modal', { query: searchQuery });
                       setQuickCaptureOpen(true);
                       setSearchModalOpen(false);
                     }}
@@ -538,6 +558,7 @@ export const GlobalSearchModal: React.FC = () => {
           <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
             <button
               onClick={() => {
+                trackButtonClick('search_bottom_nav_dashboard', 'global_search_modal');
                 setActiveTab('dashboard');
                 setSearchModalOpen(false);
               }}
@@ -548,6 +569,7 @@ export const GlobalSearchModal: React.FC = () => {
             </button>
             <button
               onClick={() => {
+                trackButtonClick('search_bottom_nav_horizons', 'global_search_modal');
                 setActiveTab('horizons');
                 setSearchModalOpen(false);
               }}
@@ -558,6 +580,7 @@ export const GlobalSearchModal: React.FC = () => {
             </button>
             <button
               onClick={() => {
+                trackButtonClick('search_bottom_nav_projects', 'global_search_modal');
                 setActiveTab('projects');
                 setSearchModalOpen(false);
               }}
@@ -568,6 +591,7 @@ export const GlobalSearchModal: React.FC = () => {
             </button>
             <button
               onClick={() => {
+                trackButtonClick('search_bottom_nav_actions', 'global_search_modal');
                 setActiveTab('actions');
                 setSearchModalOpen(false);
               }}

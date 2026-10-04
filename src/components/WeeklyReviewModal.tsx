@@ -31,6 +31,7 @@ import { useGTD } from '../context/GTDContext';
 import { GTDAction, GTDProject } from '../types/gtd';
 import { MIND_SWEEP_TRIGGERS, HORIZON_DEFINITIONS } from '../data/gtdData';
 import { ActionEditModal } from './ActionEditModal';
+import { trackButtonClick, trackModalEvent, trackReviewStep, trackReviewCompleted } from '../services/analytics';
 
 interface WeeklyReviewModalProps {
   isOpen: boolean;
@@ -181,20 +182,27 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
   const isLastStep = currentStepIndex === steps.length - 1;
 
   const handleNext = () => {
+    trackButtonClick('weekly_review_next', 'weekly_review_modal', { from_step: currentStep.type, step_index: currentStepIndex });
     if (isLastStep) {
       handleFinishReview();
     } else {
+      const nextStep = steps[currentStepIndex + 1];
+      if (nextStep) {
+        trackReviewStep(nextStep.type, `step_${currentStepIndex + 1}`);
+      }
       setCurrentStepIndex((prev) => prev + 1);
     }
   };
 
   const handlePrev = () => {
+    trackButtonClick('weekly_review_prev', 'weekly_review_modal', { from_step: currentStep.type, step_index: currentStepIndex });
     if (currentStepIndex > 0) {
       setCurrentStepIndex((prev) => prev - 1);
     }
   };
 
   const handleSetHorizonRating = (horizonId: string, rating: number) => {
+    trackButtonClick('horizon_set_rating', 'weekly_review_horizons', { horizon_id: horizonId, rating });
     setHorizonRatings((prev) => ({
       ...prev,
       [horizonId]: {
@@ -215,6 +223,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
   };
 
   const handleUpdateHorizonStatus = (horizonId: string, status: 'active' | 'achieved' | 'archived') => {
+    trackButtonClick('horizon_update_status', 'weekly_review_horizons', { horizon_id: horizonId, status });
     setHorizonRatings((prev) => ({
       ...prev,
       [horizonId]: {
@@ -227,6 +236,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
   const handleSweepCapture = (e: React.FormEvent) => {
     e.preventDefault();
     if (!sweepInput.trim()) return;
+    trackButtonClick('weekly_review_sweep_capture', 'weekly_review_modal', { length: sweepInput.trim().length });
     addAction({
       title: sweepInput.trim(),
       type: 'inbox',
@@ -238,6 +248,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
   const handleFixStalledProject = (projId: string) => {
     const text = stalledInputs[projId]?.trim();
     if (!text) return;
+    trackButtonClick('weekly_review_fix_stalled', 'weekly_review_modal', { project_id: projId });
     addAction({
       title: text,
       projectId: projId,
@@ -249,6 +260,7 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
 
   const handleFinishReview = () => {
     const elapsedMinutes = Math.max(1, Math.round((Date.now() - reviewStartTime) / 60000));
+    trackButtonClick('weekly_review_complete', 'weekly_review_modal', { duration_minutes: elapsedMinutes });
 
     // Save ratings, notes, and updated status to each horizon item
     (Object.entries(horizonRatings) as [string, HorizonReviewState][]).forEach(([hId, val]) => {
@@ -327,7 +339,10 @@ export const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({ isOpen, on
               Step {currentStepIndex + 1} of {steps.length}
             </span>
             <button
-              onClick={onClose}
+              onClick={() => {
+                trackButtonClick('weekly_review_close', 'weekly_review_modal', { step: currentStep.type });
+                onClose();
+              }}
               className="p-1.5 text-gray-400 hover:text-white rounded-lg transition-colors cursor-pointer hover:bg-[#1E1E1E]"
             >
               <X className="w-5 h-5" />

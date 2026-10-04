@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useGTD } from '../context/GTDContext';
 import { DriveSpreadsheetItem } from '../types/gtd';
+import { trackButtonClick, trackFilterChange } from '../services/analytics';
 
 interface GoogleAuthModalProps {
   isOpen: boolean;
@@ -78,6 +79,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
   };
 
   const handleSwitchSheet = async (sheet: DriveSpreadsheetItem) => {
+    trackButtonClick('google_switch_sheet_click', 'google_auth_modal', { sheet_name: sheet.name });
     setIsProcessingAction(true);
     try {
       await switchSpreadsheet(sheet.id, sheet.name);
@@ -94,6 +96,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
     e.preventDefault();
     if (!newSheetTitle.trim()) return;
 
+    trackButtonClick('google_create_sheet_click', 'google_auth_modal', { title: newSheetTitle.trim() });
     setIsProcessingAction(true);
     try {
       await createNewSpreadsheet(newSheetTitle.trim());
@@ -111,6 +114,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
     e.preventDefault();
     if (!connectUrlOrId.trim()) return;
 
+    trackButtonClick('google_connect_existing_click', 'google_auth_modal');
     setIsProcessingAction(true);
     try {
       await connectExistingSpreadsheet(connectUrlOrId.trim());
@@ -148,7 +152,10 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              trackButtonClick('google_auth_close', 'google_auth_modal');
+              onClose();
+            }}
             className="p-1.5 text-gray-400 hover:text-white hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -159,7 +166,10 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
         {user && !user.isExpired && (
           <div className="flex items-center gap-1 px-6 pt-3 border-b border-[#262626] bg-[#111111] overflow-x-auto">
             <button
-              onClick={() => setActiveTab('status')}
+              onClick={() => {
+                trackButtonClick('google_auth_tab_status', 'google_auth_modal');
+                setActiveTab('status');
+              }}
               className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer ${
                 activeTab === 'status'
                   ? 'border-[#C5A47E] text-white'
@@ -171,6 +181,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
             </button>
             <button
               onClick={() => {
+                trackButtonClick('google_auth_tab_selector', 'google_auth_modal');
                 setActiveTab('selector');
                 refreshAvailableSheets();
               }}
@@ -184,7 +195,10 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
               <span>Select Sheet ({availableSheets.length})</span>
             </button>
             <button
-              onClick={() => setActiveTab('create')}
+              onClick={() => {
+                trackButtonClick('google_auth_tab_create', 'google_auth_modal');
+                setActiveTab('create');
+              }}
               className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer ${
                 activeTab === 'create'
                   ? 'border-[#C5A47E] text-white'
@@ -195,7 +209,10 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
               <span>Create Custom Sheet</span>
             </button>
             <button
-              onClick={() => setActiveTab('connect')}
+              onClick={() => {
+                trackButtonClick('google_auth_tab_connect', 'google_auth_modal');
+                setActiveTab('connect');
+              }}
               className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer ${
                 activeTab === 'connect'
                   ? 'border-[#C5A47E] text-white'
@@ -352,7 +369,10 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
                         <span className="text-[10.5px] text-gray-400">Automatically sync changes when actions or projects are modified</span>
                       </div>
                       <button
-                        onClick={() => setAutoSyncEnabled(!autoSyncEnabled)}
+                        onClick={() => {
+                          trackButtonClick('google_auth_toggle_autosync', 'google_auth_modal', { enabled: !autoSyncEnabled });
+                          setAutoSyncEnabled(!autoSyncEnabled);
+                        }}
                         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                           autoSyncEnabled ? 'bg-emerald-500' : 'bg-gray-700'
                         }`}
@@ -372,6 +392,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
                           href={sheetUrl}
                           target="_blank"
                           rel="noopener noreferrer"
+                          onClick={() => trackButtonClick('google_auth_open_sheets_link', 'google_auth_modal')}
                           className="flex items-center gap-1.5 px-3 py-2 bg-[#141414] hover:bg-[#202020] border border-[#262626] rounded-lg text-gray-300 hover:text-white transition-colors cursor-pointer"
                         >
                           <ExternalLink className="w-3.5 h-3.5 text-[#C5A47E]" />
@@ -381,7 +402,10 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
 
                       <div className="flex items-center gap-2 ml-auto">
                         <button
-                          onClick={() => reloadFromSheet()}
+                          onClick={() => {
+                            trackButtonClick('google_auth_reload_from_sheet', 'google_auth_modal');
+                            reloadFromSheet();
+                          }}
                           disabled={isSyncing || isProcessingAction}
                           title="Force reload all data from Google Sheet into app"
                           className="px-3 py-2 bg-[#1C1C1C] hover:bg-[#242424] text-gray-300 rounded-lg text-xs font-semibold border border-[#2D2D2D] transition-colors cursor-pointer disabled:opacity-50"
@@ -390,7 +414,10 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
                         </button>
 
                         <button
-                          onClick={() => syncNow()}
+                          onClick={() => {
+                            trackButtonClick('google_auth_sync_now', 'google_auth_modal');
+                            syncNow();
+                          }}
                           disabled={isSyncing || isProcessingAction}
                           className="flex items-center gap-1.5 px-3.5 py-2 bg-[#C5A47E] hover:bg-[#b8946e] text-black font-bold rounded-lg transition-colors cursor-pointer disabled:opacity-50"
                         >
@@ -404,14 +431,20 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
                   {/* Account Actions */}
                   <div className="flex items-center justify-between pt-2">
                     <button
-                      onClick={() => signInWithGoogle(true)}
+                      onClick={() => {
+                        trackButtonClick('google_auth_switch_account', 'google_auth_modal');
+                        signInWithGoogle(true);
+                      }}
                       className="text-xs text-gray-400 hover:text-[#C5A47E] transition-colors cursor-pointer"
                     >
                       Switch Account / Re-authenticate
                     </button>
 
                     <button
-                      onClick={signOut}
+                      onClick={() => {
+                        trackButtonClick('google_auth_sign_out', 'google_auth_modal');
+                        signOut();
+                      }}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
                     >
                       <LogOut className="w-3.5 h-3.5" />
@@ -708,7 +741,10 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
               {/* Google Sign-in CTA Button */}
               <div className="space-y-2 pt-2">
                 <button
-                  onClick={() => signInWithGoogle(false)}
+                  onClick={() => {
+                    trackButtonClick('google_auth_sign_in_cta', 'google_auth_modal');
+                    signInWithGoogle(false);
+                  }}
                   disabled={isAuthLoading}
                   className="w-full py-3 px-4 bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-900 font-bold rounded-xl flex items-center justify-center gap-3 transition-all cursor-pointer shadow-lg disabled:opacity-60"
                 >
@@ -744,7 +780,10 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
 
                 <button
                   type="button"
-                  onClick={continueAsGuest}
+                  onClick={() => {
+                    trackButtonClick('google_auth_continue_guest', 'google_auth_modal');
+                    continueAsGuest();
+                  }}
                   className="text-xs text-gray-500 hover:text-gray-300 font-medium py-1.5 cursor-pointer transition-colors"
                 >
                   Continue in Guest Mode (Offline browser storage only)
@@ -759,7 +798,10 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({ isOpen, onClos
         <div className="p-4 border-t border-[#262626] bg-[#141414] flex items-center justify-between text-xs text-gray-500 shrink-0">
           <span>Google Drive API v3 • Sheets API v4</span>
           <button
-            onClick={onClose}
+            onClick={() => {
+              trackButtonClick('google_auth_footer_close', 'google_auth_modal');
+              onClose();
+            }}
             className="px-4 py-1.5 bg-[#1E1E1E] hover:bg-[#252525] text-gray-300 rounded-lg font-medium cursor-pointer transition-colors"
           >
             Close

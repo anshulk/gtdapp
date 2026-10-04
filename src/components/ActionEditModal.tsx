@@ -26,6 +26,7 @@ import {
 import { useGTD } from '../context/GTDContext';
 import { formatRecurrenceLabel, getActionStreakInfo } from '../utils/streakUtils';
 import { TagInput } from './TagInput';
+import { trackButtonClick, trackActionEvent } from '../services/analytics';
 
 interface ActionEditModalProps {
   action: GTDAction | null;
@@ -102,6 +103,18 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
     if (e) e.preventDefault();
     if (!title.trim()) return;
 
+    trackButtonClick('action_edit_save', 'action_edit_modal', {
+      action_id: action.id,
+      type,
+      priority,
+      isRecurring,
+    });
+    trackActionEvent('edit', {
+      id: action.id,
+      title: title.trim(),
+      type,
+    });
+
     updateAction(action.id, {
       title: title.trim(),
       type,
@@ -127,6 +140,8 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
   };
 
   const handleDelete = () => {
+    trackButtonClick('action_edit_delete_confirm', 'action_edit_modal', { action_id: action.id });
+    trackActionEvent('delete', { id: action.id, title: action.title });
     deleteAction(action.id);
     onClose();
   };
@@ -155,7 +170,10 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
 
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              trackButtonClick('action_edit_close', 'action_edit_modal', { action_id: action.id });
+              onClose();
+            }}
             className="p-2 text-gray-400 hover:text-white hover:bg-[#202020] rounded-xl transition-colors cursor-pointer shrink-0"
             title="Close modal"
           >
@@ -201,7 +219,10 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
                   <button
                     key={tab.value}
                     type="button"
-                    onClick={() => setType(tab.value)}
+                    onClick={() => {
+                      trackButtonClick('action_edit_select_type', 'action_edit_modal', { type: tab.value });
+                      setType(tab.value);
+                    }}
                     className={`py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-[#C5A47E] text-black border-[#C5A47E] font-bold shadow-xs'
@@ -265,7 +286,10 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
                   <button
                     key={p.value}
                     type="button"
-                    onClick={() => setPriority(p.value)}
+                    onClick={() => {
+                      trackButtonClick('action_edit_select_priority', 'action_edit_modal', { priority: p.value });
+                      setPriority(p.value);
+                    }}
                     className={`py-1.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer ${
                       priority === p.value
                         ? 'bg-[#222222] border-[#C5A47E] text-white shadow-xs'
@@ -463,7 +487,10 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={() => {
+                  trackButtonClick('action_edit_delete_cancel', 'action_edit_modal');
+                  setShowDeleteConfirm(false);
+                }}
                 className="px-2 py-1 text-gray-400 hover:text-white text-xs cursor-pointer transition-colors"
               >
                 Cancel
@@ -472,7 +499,10 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
           ) : (
             <button
               type="button"
-              onClick={() => setShowDeleteConfirm(true)}
+              onClick={() => {
+                trackButtonClick('action_edit_delete_prompt', 'action_edit_modal');
+                setShowDeleteConfirm(true);
+              }}
               className="px-3 py-2 text-gray-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <Trash2 className="w-4 h-4" />
@@ -483,7 +513,10 @@ export const ActionEditModal: React.FC<ActionEditModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => {
+                trackButtonClick('action_edit_cancel', 'action_edit_modal');
+                onClose();
+              }}
               className="px-4 py-2 bg-[#202020] hover:bg-[#282828] text-gray-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
             >
               Cancel

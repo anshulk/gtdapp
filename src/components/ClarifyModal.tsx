@@ -15,6 +15,7 @@ import {
 import { useGTD } from '../context/GTDContext';
 import { GTDAction } from '../types/gtd';
 import { TagInput } from './TagInput';
+import { trackButtonClick, trackModalEvent } from '../services/analytics';
 
 export const ClarifyModal: React.FC = () => {
   const {

@@ -28,6 +28,7 @@ import { ActionEditModal } from './ActionEditModal';
 import { TagInput } from './TagInput';
 import { getActionStreakInfo, formatRecurrenceLabel } from '../utils/streakUtils';
 import { isProjectStalled } from '../utils/projectUtils';
+import { trackButtonClick, trackActionEvent, trackProjectEvent } from '../services/analytics';
 
 interface ProjectDetailModalProps {
   projectId: string | null;
@@ -81,6 +82,16 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   const handleAddAction = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newActionTitle.trim()) return;
+
+    trackButtonClick('project_detail_add_action', 'project_detail_modal', {
+      project_id: project.id,
+      isRecurring,
+      tags_count: newActionTags.length,
+    });
+    trackActionEvent('create', {
+      projectId: project.id,
+      title: newActionTitle.trim(),
+    });
 
     addAction({
       title: newActionTitle.trim(),
@@ -164,7 +175,10 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
 
           <div className="flex items-center gap-1">
             <button
-              onClick={() => onEditProject(project)}
+              onClick={() => {
+                trackButtonClick('project_detail_edit_click', 'project_detail_modal', { project_id: project.id });
+                onEditProject(project);
+              }}
               className="p-2 text-gray-400 hover:text-[#C5A47E] hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer"
               title="Edit Project Details"
             >
@@ -172,7 +186,9 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
             </button>
             <button
               onClick={(e) => {
+                trackButtonClick('project_detail_delete_click', 'project_detail_modal', { project_id: project.id, shift: e.shiftKey });
                 if (e.shiftKey) {
+                  trackProjectEvent('delete', { id: project.id, title: project.title });
                   deleteProject(project.id);
                   onClose();
                 } else {
@@ -185,7 +201,10 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
               <Trash2 className="w-4 h-4" />
             </button>
             <button
-              onClick={onClose}
+              onClick={() => {
+                trackButtonClick('project_detail_close', 'project_detail_modal', { project_id: project.id });
+                onClose();
+              }}
               className="p-2 text-gray-400 hover:text-white hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
@@ -573,7 +592,10 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
         <div className="p-4 border-t border-[#262626] bg-[#141414] flex items-center justify-between text-xs">
           <button
             type="button"
-            onClick={() => setShowDeleteConfirm(true)}
+            onClick={() => {
+              trackButtonClick('project_detail_delete_prompt', 'project_detail_modal', { project_id: project.id });
+              setShowDeleteConfirm(true);
+            }}
             className="text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1.5 px-3 py-1.5 hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -583,7 +605,10 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
           <div className="flex items-center gap-2">
             {project.status !== 'completed' ? (
               <button
+                type="button"
                 onClick={() => {
+                  trackButtonClick('project_detail_mark_completed', 'project_detail_modal', { project_id: project.id });
+                  trackProjectEvent('status_change', { id: project.id, status: 'completed' });
                   updateProject(project.id, { status: 'completed' });
                   onClose();
                 }}
@@ -593,7 +618,10 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
               </button>
             ) : (
               <button
+                type="button"
                 onClick={() => {
+                  trackButtonClick('project_detail_reopen', 'project_detail_modal', { project_id: project.id });
+                  trackProjectEvent('status_change', { id: project.id, status: 'active' });
                   updateProject(project.id, { status: 'active' });
                 }}
                 className="px-4 py-2 bg-[#1E1E1E] hover:bg-[#252525] border border-[#262626] text-white rounded-xl font-semibold transition-colors cursor-pointer"

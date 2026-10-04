@@ -5,6 +5,7 @@ import { ActionType, RecurrencePeriod } from '../types/gtd';
 import { formatRecurrenceLabel } from '../utils/streakUtils';
 import { HorizonMappingSelector } from './HorizonMappingSelector';
 import { TagInput } from './TagInput';
+import { trackButtonClick, trackModalEvent } from '../services/analytics';
 
 export const QuickCaptureModal: React.FC = () => {
   const {
@@ -83,6 +84,9 @@ export const QuickCaptureModal: React.FC = () => {
     e.preventDefault();
     if (!title.trim()) return;
 
+    trackButtonClick('quick_capture_submit', 'quick_capture_modal', { capture_type: captureType });
+    trackModalEvent('quick_capture', 'submit', { capture_type: captureType });
+
     if (captureType === 'project') {
       addProject(
         {
@@ -144,7 +148,10 @@ export const QuickCaptureModal: React.FC = () => {
             </div>
           </div>
           <button
-            onClick={() => setQuickCaptureOpen(false)}
+            onClick={() => {
+              trackButtonClick('quick_capture_close_x', 'quick_capture_modal');
+              setQuickCaptureOpen(false);
+            }}
             className="p-2 text-gray-400 hover:text-white hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -158,7 +165,10 @@ export const QuickCaptureModal: React.FC = () => {
           <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 p-1 bg-[#1E1E1E] border border-[#262626] rounded-2xl text-xs font-semibold">
             <button
               type="button"
-              onClick={() => setCaptureType('inbox')}
+              onClick={() => {
+                trackButtonClick('quick_capture_type_inbox', 'quick_capture_modal');
+                setCaptureType('inbox');
+              }}
               className={`p-2 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${
                 captureType === 'inbox'
                   ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
@@ -171,7 +181,10 @@ export const QuickCaptureModal: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => setCaptureType('action')}
+              onClick={() => {
+                trackButtonClick('quick_capture_type_action', 'quick_capture_modal');
+                setCaptureType('action');
+              }}
               className={`p-2 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${
                 captureType === 'action'
                   ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
@@ -184,7 +197,10 @@ export const QuickCaptureModal: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => setCaptureType('project')}
+              onClick={() => {
+                trackButtonClick('quick_capture_type_project', 'quick_capture_modal');
+                setCaptureType('project');
+              }}
               className={`p-2 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${
                 captureType === 'project'
                   ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
@@ -197,7 +213,10 @@ export const QuickCaptureModal: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => setCaptureType('waiting-for')}
+              onClick={() => {
+                trackButtonClick('quick_capture_type_waiting', 'quick_capture_modal');
+                setCaptureType('waiting-for');
+              }}
               className={`p-2 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${
                 captureType === 'waiting-for'
                   ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
@@ -210,7 +229,10 @@ export const QuickCaptureModal: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => setCaptureType('someday-maybe')}
+              onClick={() => {
+                trackButtonClick('quick_capture_type_someday', 'quick_capture_modal');
+                setCaptureType('someday-maybe');
+              }}
               className={`p-2 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${
                 captureType === 'someday-maybe'
                   ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
@@ -443,7 +465,10 @@ export const QuickCaptureModal: React.FC = () => {
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#262626]">
             <button
               type="button"
-              onClick={() => setQuickCaptureOpen(false)}
+              onClick={() => {
+                trackButtonClick('quick_capture_cancel', 'quick_capture_modal');
+                setQuickCaptureOpen(false);
+              }}
               className="px-4 py-2 text-xs font-semibold text-gray-400 hover:text-white hover:bg-[#1E1E1E] rounded-xl transition-colors cursor-pointer"
             >
               Cancel

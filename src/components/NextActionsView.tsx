@@ -32,6 +32,7 @@ import { RecurringStreakBadge } from './RecurringStreakBadge';
 import { ActionEditModal } from './ActionEditModal';
 import { formatRecurrenceLabel, getActionStreakInfo } from '../utils/streakUtils';
 import { TagInput } from './TagInput';
+import { trackButtonClick, trackFilterChange, trackSubView } from '../services/analytics';
 
 interface NextActionsViewProps {
   initialSubTab?: 'actions' | 'inbox' | 'waiting' | 'someday';
@@ -62,6 +63,17 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
       setSubTab(initialSubTab);
     }
   }, [initialSubTab]);
+
+  // Track sub-view engagement
+  useEffect(() => {
+    trackSubView('actions', subTab, {
+      tag_filter: selectedTag,
+      project_filter: selectedProjectFilter,
+      show_completed: showCompleted,
+      recurring_only: filterRecurringOnly,
+      total_actions: actions.length,
+    });
+  }, [subTab]);
   
   // Action Filters
   const [selectedTag, setSelectedTag] = useState<string>('all');
@@ -96,6 +108,8 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
   const handleCreateAction = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
+
+    trackButtonClick('actions_submit_quick_add', 'actions_quick_bar', { is_recurring: isRecurring });
 
     addAction({
       title: newTitle.trim(),
@@ -442,7 +456,10 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
           </div>
 
           <button
-            onClick={() => setQuickCaptureOpen(true)}
+            onClick={() => {
+              trackButtonClick('actions_quick_capture', 'actions_header');
+              setQuickCaptureOpen(true);
+            }}
             className="px-3 py-1.5 bg-[#C5A47E] hover:bg-[#b8946e] active:bg-[#a8845e] text-black text-xs font-bold rounded-lg shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
             title="Quick Capture (Inbox)"
             aria-label="Quick Capture"
@@ -456,6 +473,7 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
         <div className="mt-3 pt-3 border-t border-[#202020] flex flex-wrap items-center gap-2 text-xs">
           <button
             onClick={() => {
+              trackButtonClick('actions_subtab_actions', 'actions_navigation');
               setSubTab('actions');
               setActiveTab('actions');
             }}
@@ -476,6 +494,7 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
 
           <button
             onClick={() => {
+              trackButtonClick('actions_subtab_inbox', 'actions_navigation');
               setSubTab('inbox');
               setActiveTab('inbox');
             }}
@@ -496,6 +515,7 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
 
           <button
             onClick={() => {
+              trackButtonClick('actions_subtab_waiting', 'actions_navigation');
               setSubTab('waiting');
               setActiveTab('waiting');
             }}
@@ -516,6 +536,7 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
 
           <button
             onClick={() => {
+              trackButtonClick('actions_subtab_someday', 'actions_navigation');
               setSubTab('someday');
               setActiveTab('someday');
             }}
@@ -699,7 +720,10 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
                 {/* Filter Button */}
                 <button
                   type="button"
-                  onClick={() => setIsFilterPanelOpen((prev) => !prev)}
+                  onClick={() => {
+                    trackButtonClick('actions_toggle_filter_panel', 'actions_controls', { open: !isFilterPanelOpen });
+                    setIsFilterPanelOpen((prev) => !prev);
+                  }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                     isFilterPanelOpen || activeFilterCount > 0
                       ? 'bg-[#C5A47E]/15 border border-[#C5A47E]/50 text-[#C5A47E]'
@@ -720,7 +744,10 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
                 <div className="flex items-center rounded-lg bg-[#181818] border border-[#282828] p-0.5 text-xs shrink-0">
                   <button
                     type="button"
-                    onClick={() => setGroupByProject(true)}
+                    onClick={() => {
+                      trackButtonClick('actions_layout_grouped', 'actions_controls');
+                      setGroupByProject(true);
+                    }}
                     className={`px-2.5 py-1 rounded-md font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                       groupByProject
                         ? 'bg-[#C5A47E] text-black shadow-xs'
@@ -734,7 +761,10 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
 
                   <button
                     type="button"
-                    onClick={() => setGroupByProject(false)}
+                    onClick={() => {
+                      trackButtonClick('actions_layout_flat', 'actions_controls');
+                      setGroupByProject(false);
+                    }}
                     className={`px-2.5 py-1 rounded-md font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                       !groupByProject
                         ? 'bg-[#C5A47E] text-black shadow-xs'
@@ -754,15 +784,21 @@ export const NextActionsView: React.FC<NextActionsViewProps> = ({ initialSubTab 
                   <div className="flex items-center gap-1 text-[11px] text-gray-400">
                     <button
                       type="button"
-                      onClick={expandAllProjects}
+                      onClick={() => {
+                        trackButtonClick('actions_expand_all_projects', 'actions_controls');
+                        expandAllProjects();
+                      }}
                       className="hover:text-white px-2 py-1 rounded bg-[#181818] border border-[#282828] hover:border-[#383838] transition-colors cursor-pointer"
                     >
                       Expand All
                     </button>
                     <button
                       type="button"
-                      onClick={collapseAllProjects}
-                      className="hover:text-white px-2 py-1 rounded bg-[#181818] border border-[#282828] hover:border-[#383838] transition-colors cursor-pointer"
+                      onClick={() => {
+                        trackButtonClick('actions_collapse_all_projects', 'actions_controls');
+                        collapseAllProjects();
+                      }}
+                      className="hover:text-white px-2 py-1 rounded bg-[#181818] border border-[#262626] hover:border-[#383838] transition-colors cursor-pointer"
                     >
                       Collapse All
                     </button>

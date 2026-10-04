@@ -3,6 +3,7 @@ import { X, Compass, Plus, Trash2, ShieldCheck, Target, Eye, Layers, Tag, Star }
 import { HorizonItem, HorizonLevel } from '../types/gtd';
 import { useGTD } from '../context/GTDContext';
 import { HORIZON_DEFINITIONS, LIFE_DOMAINS } from '../data/gtdData';
+import { trackButtonClick } from '../services/analytics';
 
 interface HorizonItemModalProps {
   isOpen: boolean;
@@ -123,6 +124,12 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
       return;
     }
 
+    trackButtonClick(itemToEdit ? 'horizon_modal_save' : 'horizon_modal_create', 'horizon_modal', {
+      level,
+      item_id: itemToEdit?.id,
+      has_parent: Boolean(parentId),
+    });
+
     const filteredKeyResults = keyResults.map((k) => k.trim()).filter(Boolean);
     // Horizon 4 (3-5 Year Vision) is the sole authority for Life Domain
     const effectiveLifeDomain = level === 4 ? (lifeDomain || undefined) : undefined;
@@ -179,7 +186,10 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              trackButtonClick('horizon_modal_close', 'horizon_modal', { level, item_id: itemToEdit?.id });
+              onClose();
+            }}
             className="p-2 text-gray-400 hover:text-white hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -202,7 +212,10 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
                   <button
                     type="button"
                     key={lvl}
-                    onClick={() => handleLevelChange(lvl as HorizonLevel)}
+                    onClick={() => {
+                      trackButtonClick('horizon_modal_select_level', 'horizon_modal', { level: lvl });
+                      handleLevelChange(lvl as HorizonLevel);
+                    }}
                     className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
                       isSelected
                         ? 'border-[#C5A47E] bg-[#C5A47E]/10 ring-1 ring-[#C5A47E]/30 text-white'
@@ -508,7 +521,10 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
               {progressRating && (
                 <button
                   type="button"
-                  onClick={() => setProgressRating(undefined)}
+                  onClick={() => {
+                    trackButtonClick('horizon_modal_clear_rating', 'horizon_modal');
+                    setProgressRating(undefined);
+                  }}
                   className="text-[11px] text-gray-500 hover:text-gray-300 underline cursor-pointer"
                 >
                   Clear rating
@@ -529,7 +545,10 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
                   <button
                     key={btn.score}
                     type="button"
-                    onClick={() => setProgressRating(btn.score)}
+                    onClick={() => {
+                      trackButtonClick('horizon_modal_set_rating', 'horizon_modal', { score: btn.score });
+                      setProgressRating(btn.score);
+                    }}
                     className={`p-2 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
                       isSelected
                         ? 'bg-[#C5A47E] text-black border-[#C5A47E] shadow-sm font-bold'
@@ -571,6 +590,7 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      trackButtonClick('horizon_modal_delete_confirm', 'horizon_modal', { item_id: itemToEdit.id, level });
                       deleteHorizonItem(itemToEdit.id);
                       onClose();
                     }}
@@ -580,7 +600,10 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setConfirmDelete(false)}
+                    onClick={() => {
+                      trackButtonClick('horizon_modal_delete_cancel', 'horizon_modal');
+                      setConfirmDelete(false);
+                    }}
                     className="px-2.5 py-1.5 text-xs font-semibold text-gray-400 hover:text-white rounded-lg transition-colors cursor-pointer"
                   >
                     Cancel
@@ -589,7 +612,10 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
               ) : (
                 <button
                   type="button"
-                  onClick={() => setConfirmDelete(true)}
+                  onClick={() => {
+                    trackButtonClick('horizon_modal_delete_prompt', 'horizon_modal');
+                    setConfirmDelete(true);
+                  }}
                   className="px-3 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -603,7 +629,10 @@ export const HorizonItemModal: React.FC<HorizonItemModalProps> = ({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={() => {
+                  trackButtonClick('horizon_modal_cancel', 'horizon_modal');
+                  onClose();
+                }}
                 className="px-4 py-2 text-xs font-semibold text-gray-400 hover:text-white hover:bg-[#1E1E1E] rounded-xl transition-colors cursor-pointer"
               >
                 Cancel

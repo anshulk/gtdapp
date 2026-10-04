@@ -30,6 +30,7 @@ import { useGTD } from '../context/GTDContext';
 import { ActiveTab } from '../types/gtd';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { trackButtonClick, trackSyncEvent } from '../services/analytics';
 
 export const Navbar: React.FC = () => {
   const {
@@ -121,7 +122,10 @@ export const Navbar: React.FC = () => {
           {/* Logo & Brand with Compass Icon */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <button
-              onClick={() => setActiveTab('dashboard')}
+              onClick={() => {
+                trackButtonClick('brand_logo', 'navbar');
+                setActiveTab('dashboard');
+              }}
               className="flex items-center gap-2.5 group text-left cursor-pointer"
             >
               <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#171512] border border-[#C5A47E]/40 p-1 flex items-center justify-center shadow-md group-hover:border-[#C5A47E] group-hover:scale-105 transition-all">
@@ -136,7 +140,10 @@ export const Navbar: React.FC = () => {
           {/* Center: Search Bar & Mind Sweep Trigger */}
           <div className="flex-1 max-w-md hidden md:flex items-center gap-2">
             <div 
-              onClick={() => setSearchModalOpen(true)}
+              onClick={() => {
+                trackButtonClick('search_open_desktop', 'navbar');
+                setSearchModalOpen(true);
+              }}
               className="relative w-full cursor-pointer group"
             >
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 group-hover:text-[#C5A47E] transition-colors" />
@@ -144,7 +151,10 @@ export const Navbar: React.FC = () => {
                 type="text"
                 readOnly
                 value={searchQuery}
-                onFocus={() => setSearchModalOpen(true)}
+                onFocus={() => {
+                  trackButtonClick('search_focus_desktop', 'navbar');
+                  setSearchModalOpen(true);
+                }}
                 placeholder="Search actions, projects, horizons..."
                 className="w-full pl-9 pr-14 py-1.5 text-xs sm:text-sm bg-[#141414] group-hover:bg-[#1A1A1A] border border-[#262626] group-hover:border-[#383838] rounded-lg text-gray-200 placeholder-gray-500 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-[#C5A47E] focus:border-[#C5A47E] transition-all"
               />
@@ -156,7 +166,10 @@ export const Navbar: React.FC = () => {
             </div>
 
             <button
-              onClick={() => setMindSweepOpen(true)}
+              onClick={() => {
+                trackButtonClick('mind_sweep_open', 'navbar');
+                setMindSweepOpen(true);
+              }}
               title="David Allen Mind Sweep Trigger List"
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#C5A47E] bg-[#191919] hover:bg-[#222222] border border-[#262626] rounded-lg transition-colors shrink-0 shadow-xs cursor-pointer"
             >
@@ -169,7 +182,10 @@ export const Navbar: React.FC = () => {
           <div className="flex items-center gap-1.5 sm:gap-2">
             {/* Mobile Search Toggle Button */}
             <button
-              onClick={() => setSearchModalOpen(true)}
+              onClick={() => {
+                trackButtonClick('search_open_mobile', 'navbar');
+                setSearchModalOpen(true);
+              }}
               className={`md:hidden p-2 rounded-lg border transition-colors cursor-pointer ${
                 searchModalOpen || searchQuery
                   ? 'bg-[#C5A47E]/15 text-[#C5A47E] border-[#C5A47E]/40'
@@ -183,7 +199,10 @@ export const Navbar: React.FC = () => {
 
             {/* Mobile Mind Sweep Trigger Button */}
             <button
-              onClick={() => setMindSweepOpen(true)}
+              onClick={() => {
+                trackButtonClick('mind_sweep_open_mobile', 'navbar');
+                setMindSweepOpen(true);
+              }}
               className="md:hidden p-2 text-[#C5A47E] bg-[#141414] hover:bg-[#1C1C1C] border border-[#262626] rounded-lg transition-colors cursor-pointer"
               title="Mind Sweep Trigger List"
               aria-label="Mind Sweep"
@@ -193,7 +212,10 @@ export const Navbar: React.FC = () => {
 
             {/* Quick Capture Button (Minimal + button) */}
             <button
-              onClick={() => setQuickCaptureOpen(true)}
+              onClick={() => {
+                trackButtonClick('quick_capture_open', 'navbar');
+                setQuickCaptureOpen(true);
+              }}
               className="flex items-center justify-center w-8 h-8 text-black bg-[#C5A47E] hover:bg-[#b8946e] active:bg-[#a8845e] rounded-lg shadow-xs transition-all cursor-pointer"
               title="Quick Capture (Press C)"
               aria-label="Quick Capture"
@@ -351,6 +373,7 @@ export const Navbar: React.FC = () => {
                     
                     <button
                       onClick={() => {
+                        trackButtonClick('export_gtd_json', 'navbar_menu');
                         exportData();
                         setMenuOpen(false);
                       }}
@@ -363,11 +386,20 @@ export const Navbar: React.FC = () => {
                     <label className="w-full flex items-center gap-2.5 px-3.5 py-2 text-gray-300 hover:bg-[#1E1E1E] text-left font-medium cursor-pointer">
                       <Upload className="w-4 h-4 text-gray-400" />
                       <span>Import GTD Backup</span>
-                      <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
+                      <input 
+                        type="file" 
+                        accept=".json" 
+                        onChange={(e) => {
+                          trackButtonClick('import_gtd_backup', 'navbar_menu');
+                          handleFileUpload(e);
+                        }} 
+                        className="hidden" 
+                      />
                     </label>
 
                     <button
                       onClick={() => {
+                        trackButtonClick('reset_to_sample_template', 'navbar_menu');
                         setShowResetConfirm(true);
                         setMenuOpen(false);
                       }}
@@ -382,6 +414,7 @@ export const Navbar: React.FC = () => {
                         <div className="my-1 border-t border-[#262626]" />
                         <button
                           onClick={() => {
+                            trackButtonClick('sign_out', 'navbar_menu');
                             signOut();
                             setMenuOpen(false);
                           }}
@@ -408,7 +441,10 @@ export const Navbar: React.FC = () => {
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => {
+                  trackButtonClick(`nav_tab_${item.id}`, 'navbar_tabs', { target_tab: item.id });
+                  setActiveTab(item.id);
+                }}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg whitespace-nowrap transition-all cursor-pointer ${
                   isActive
                     ? 'bg-[#C5A47E] text-black font-bold shadow-xs'

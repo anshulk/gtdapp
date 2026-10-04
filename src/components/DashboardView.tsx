@@ -36,6 +36,7 @@ import { GTDAction, GTDProject } from '../types/gtd';
 import { getActionStreakInfo, formatDateKey } from '../utils/streakUtils';
 import { ActionEditModal } from './ActionEditModal';
 import { CockpitSpiderChart } from './CockpitSpiderChart';
+import { trackButtonClick, trackFilterChange, trackActionEvent } from '../services/analytics';
 
 export const DashboardView: React.FC = () => {
   const {
@@ -195,6 +196,8 @@ export const DashboardView: React.FC = () => {
   }, [tagSearchQuery, actions, allTags]);
 
   const handleSelectTagSuggestion = (sug: TagSuggestion) => {
+    trackButtonClick('select_tag_filter', 'cockpit_tag_filter', { tag: sug.name, type: sug.type });
+    trackFilterChange('tag', sug.name, 'cockpit');
     if (sug.type === 'all') {
       setSelectedTag('all');
       setTagSearchQuery('');
@@ -209,6 +212,8 @@ export const DashboardView: React.FC = () => {
   };
 
   const handleClearTagFilter = () => {
+    trackButtonClick('clear_tag_filter', 'cockpit_tag_filter');
+    trackFilterChange('tag', 'all', 'cockpit');
     setSelectedTag('all');
     setTagSearchQuery('');
     setIsTagDropdownOpen(false);
@@ -324,6 +329,7 @@ export const DashboardView: React.FC = () => {
   }, [actionableItems, projects, horizonItems, selectedTag]);
 
   const toggleProjectCollapse = (projectId: string) => {
+    trackButtonClick('toggle_project_collapse', 'cockpit_project_group', { project_id: projectId });
     setCollapsedProjectIds((prev) => {
       const next = new Set(prev);
       if (next.has(projectId)) {
@@ -336,10 +342,12 @@ export const DashboardView: React.FC = () => {
   };
 
   const expandAllProjects = () => {
+    trackButtonClick('cockpit_expand_all_projects', 'cockpit_controls');
     setCollapsedProjectIds(new Set());
   };
 
   const collapseAllProjects = () => {
+    trackButtonClick('cockpit_collapse_all_projects', 'cockpit_controls');
     const allIds = new Set(cockpitProjectGroups.map((g) => g.id));
     setCollapsedProjectIds(allIds);
   };
@@ -388,6 +396,13 @@ export const DashboardView: React.FC = () => {
       priority: 'medium',
     });
 
+    trackActionEvent('create', {
+      title: cleanedTitle,
+      projectId: isStandalone ? undefined : projectId,
+      isStandalone,
+      tags: combinedTags,
+    });
+
     setNewActionInput((prev) => ({ ...prev, [projectId]: '' }));
     setActiveAddProjectId(null);
 
@@ -432,7 +447,10 @@ export const DashboardView: React.FC = () => {
             </div>
 
             <button
-              onClick={() => setWeeklyReviewOpen(true)}
+              onClick={() => {
+                trackButtonClick('weekly_review_from_barometer', 'cockpit_barometer');
+                setWeeklyReviewOpen(true);
+              }}
               className="py-1 px-2.5 text-xs font-bold bg-[#C5A47E] hover:bg-[#b8946e] text-black rounded-lg shadow-xs transition-all flex items-center gap-1 cursor-pointer shrink-0"
             >
               <Sparkles className="w-3 h-3" />
@@ -450,6 +468,7 @@ export const DashboardView: React.FC = () => {
               <button
                 key={lvl}
                 onClick={() => {
+                  trackButtonClick(`barometer_h${lvl}`, 'cockpit_barometer', { level: lvl });
                   if (lvl === 1) setActiveTab('projects');
                   else if (lvl === 0) setActiveTab('actions');
                   else setActiveTab('horizons');
@@ -522,7 +541,10 @@ export const DashboardView: React.FC = () => {
                         className="text-xs px-3 py-1.5 bg-[#141414] border border-[#262626] text-gray-200 placeholder-gray-500 rounded-lg flex-1 min-w-0 lg:w-64 focus:bg-[#181818] focus:outline-hidden focus:ring-1 focus:ring-[#C5A47E] focus:border-[#C5A47E]"
                       />
                       <button
-                        onClick={() => handleAddProjectNextAction(proj.id)}
+                        onClick={() => {
+                          trackButtonClick('stalled_project_add_action', 'cockpit_stalled_alert', { project_id: proj.id });
+                          handleAddProjectNextAction(proj.id);
+                        }}
                         className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-black text-xs font-bold rounded-lg shrink-0 whitespace-nowrap transition-colors cursor-pointer"
                       >
                         Add Action
@@ -664,7 +686,10 @@ export const DashboardView: React.FC = () => {
                     <span>Tags on cards</span>
                     <button
                       type="button"
-                      onClick={() => setShowTags((prev) => !prev)}
+                      onClick={() => {
+                        trackButtonClick(showTags ? 'hide_card_tags' : 'show_card_tags', 'cockpit_tag_settings');
+                        setShowTags((prev) => !prev);
+                      }}
                       className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold border transition-all cursor-pointer ${
                         showTags
                           ? 'bg-[#C5A47E]/15 border-[#C5A47E]/50 text-[#C5A47E]'
@@ -723,7 +748,10 @@ export const DashboardView: React.FC = () => {
 
               <button
                 type="button"
-                onClick={() => setQuickCaptureOpen(true)}
+                onClick={() => {
+                  trackButtonClick('cockpit_quick_capture', 'cockpit_controls');
+                  setQuickCaptureOpen(true);
+                }}
                 className="p-1.5 rounded-lg text-xs font-bold bg-[#1C1C1C] hover:bg-[#252525] text-[#C5A47E] hover:text-[#E0C7A8] border border-[#2B2B2B] hover:border-[#C5A47E]/40 transition-colors flex items-center justify-center cursor-pointer shadow-xs shrink-0"
                 title="Quick Capture New Action (Press C)"
                 aria-label="New Action"
@@ -804,6 +832,10 @@ export const DashboardView: React.FC = () => {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
+                            trackButtonClick('open_inline_add_action', 'cockpit_project_header', {
+                              project_id: group.id,
+                              project_title: group.title,
+                            });
                             setCollapsedProjectIds((prev) => {
                               const next = new Set(prev);
                               next.delete(group.id);
@@ -840,9 +872,11 @@ export const DashboardView: React.FC = () => {
                                   if (e.key === 'Enter') {
                                     e.preventDefault();
                                     if (newActionInput[group.id]?.trim()) {
+                                      trackButtonClick('submit_inline_add_action', 'cockpit_project_group', { project_id: group.id });
                                       handleAddProjectNextAction(group.id, group.isStandalone);
                                     }
                                   } else if (e.key === 'Escape') {
+                                    trackButtonClick('cancel_inline_add_action', 'cockpit_project_group', { project_id: group.id });
                                     setActiveAddProjectId(null);
                                   }
                                 }}
@@ -851,7 +885,10 @@ export const DashboardView: React.FC = () => {
                               />
                               <button
                                 type="button"
-                                onClick={() => handleAddProjectNextAction(group.id, group.isStandalone)}
+                                onClick={() => {
+                                  trackButtonClick('submit_inline_add_action', 'cockpit_project_group', { project_id: group.id });
+                                  handleAddProjectNextAction(group.id, group.isStandalone);
+                                }}
                                 disabled={!newActionInput[group.id]?.trim()}
                                 className={`px-2.5 py-1.5 rounded-md text-xs font-bold transition-all ${
                                   newActionInput[group.id]?.trim()
@@ -864,7 +901,10 @@ export const DashboardView: React.FC = () => {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => setActiveAddProjectId(null)}
+                                onClick={() => {
+                                  trackButtonClick('cancel_inline_add_action', 'cockpit_project_group', { project_id: group.id });
+                                  setActiveAddProjectId(null);
+                                }}
                                 className="p-1 text-gray-400 hover:text-white rounded hover:bg-[#252525] transition-colors cursor-pointer"
                                 title="Cancel (Esc)"
                               >
@@ -891,7 +931,14 @@ export const DashboardView: React.FC = () => {
                                 <div className="flex items-center gap-2.5 flex-1 min-w-0">
                                   <button
                                     type="button"
-                                    onClick={() => toggleActionComplete(action.id)}
+                                    onClick={() => {
+                                      trackButtonClick('toggle_action_checkbox', 'cockpit_action_card', {
+                                        action_id: action.id,
+                                        is_recurring: action.isRecurring,
+                                        will_be_done: !isDone,
+                                      });
+                                      toggleActionComplete(action.id);
+                                    }}
                                     className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shrink-0 cursor-pointer ${
                                       isDone
                                         ? 'bg-[#C5A47E] border-[#C5A47E] text-black'
@@ -909,7 +956,10 @@ export const DashboardView: React.FC = () => {
                                   </button>
 
                                   <span
-                                    onClick={() => setEditingAction(action)}
+                                    onClick={() => {
+                                      trackButtonClick('edit_action_title', 'cockpit_action_card', { action_id: action.id });
+                                      setEditingAction(action);
+                                    }}
                                     className={`text-xs sm:text-sm font-medium leading-tight truncate hover:text-[#C5A47E] cursor-pointer transition-colors ${
                                       isDone ? 'text-gray-400' : 'text-gray-200'
                                     }`}
@@ -1010,7 +1060,10 @@ export const DashboardView: React.FC = () => {
               </div>
 
               <button
-                onClick={() => setActiveTab('inbox')}
+                onClick={() => {
+                  trackButtonClick('inbox_view_all', 'cockpit_inbox_card');
+                  setActiveTab('inbox');
+                }}
                 className="text-xs font-semibold text-[#C5A47E] hover:text-[#e0c29d] flex items-center gap-1 cursor-pointer"
               >
                 <span>View All</span>
@@ -1030,7 +1083,10 @@ export const DashboardView: React.FC = () => {
                     className="p-3 bg-[#191919] hover:bg-[#202020] rounded-xl border border-[#262626] flex items-center justify-between gap-2 text-xs transition-colors group"
                   >
                     <span 
-                      onClick={() => setEditingAction(item)}
+                      onClick={() => {
+                        trackButtonClick('inbox_edit_title', 'cockpit_inbox_card', { item_id: item.id });
+                        setEditingAction(item);
+                      }}
                       className="font-medium text-gray-300 truncate flex-1 cursor-pointer hover:text-[#C5A47E] transition-colors"
                       title="Click to edit item"
                     >
@@ -1039,14 +1095,20 @@ export const DashboardView: React.FC = () => {
                     <div className="flex items-center gap-1 shrink-0">
                       <button
                         type="button"
-                        onClick={() => setEditingAction(item)}
+                        onClick={() => {
+                          trackButtonClick('inbox_edit_button', 'cockpit_inbox_card', { item_id: item.id });
+                          setEditingAction(item);
+                        }}
                         className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-[#C5A47E] rounded transition-opacity cursor-pointer"
                         title="Edit Item"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => setClarifyModalItem(item)}
+                        onClick={() => {
+                          trackButtonClick('inbox_clarify_button', 'cockpit_inbox_card', { item_id: item.id });
+                          setClarifyModalItem(item);
+                        }}
                         className="px-2.5 py-1 bg-[#C5A47E] hover:bg-[#b8946e] text-black rounded-lg font-bold text-[11px] shrink-0 transition-colors cursor-pointer"
                       >
                         Clarify
@@ -1074,7 +1136,10 @@ export const DashboardView: React.FC = () => {
               </div>
 
               <button
-                onClick={() => setActiveTab('waiting')}
+                onClick={() => {
+                  trackButtonClick('waiting_for_view_all', 'cockpit_waiting_card');
+                  setActiveTab('waiting');
+                }}
                 className="text-xs font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer"
               >
                 <span>View All</span>
@@ -1095,7 +1160,10 @@ export const DashboardView: React.FC = () => {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <span 
-                        onClick={() => setEditingAction(item)}
+                        onClick={() => {
+                          trackButtonClick('waiting_for_edit_title', 'cockpit_waiting_card', { item_id: item.id });
+                          setEditingAction(item);
+                        }}
                         className="font-semibold text-gray-200 leading-snug cursor-pointer hover:text-amber-300 transition-colors"
                         title="Click to edit item"
                       >
@@ -1104,14 +1172,20 @@ export const DashboardView: React.FC = () => {
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
-                          onClick={() => setEditingAction(item)}
+                          onClick={() => {
+                            trackButtonClick('waiting_for_edit_button', 'cockpit_waiting_card', { item_id: item.id });
+                            setEditingAction(item);
+                          }}
                           className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-amber-300 rounded transition-opacity cursor-pointer"
                           title="Edit delegation"
                         >
-                          <Edit3 className="w-3 h-3" />
+                          <Edit3 className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={() => toggleActionComplete(item.id)}
+                          onClick={() => {
+                            trackButtonClick('waiting_for_received_button', 'cockpit_waiting_card', { item_id: item.id });
+                            toggleActionComplete(item.id);
+                          }}
                           className="text-[10px] font-bold px-2 py-0.5 bg-[#1E1E1E] hover:bg-emerald-950 text-gray-300 hover:text-emerald-300 border border-[#262626] rounded shrink-0 transition-colors cursor-pointer"
                           title="Mark received / completed"
                         >

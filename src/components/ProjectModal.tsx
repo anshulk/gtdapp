@@ -5,6 +5,7 @@ import { useGTD } from '../context/GTDContext';
 import { getAncestorH4ForProject } from '../utils/domainHierarchy';
 import { HorizonMappingSelector } from './HorizonMappingSelector';
 import { HorizonItemModal } from './HorizonItemModal';
+import { trackButtonClick, trackProjectEvent } from '../services/analytics';
 
 interface ProjectModalProps {
   isOpen: boolean;
@@ -92,6 +93,17 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     e.preventDefault();
     if (!title.trim() || !desiredOutcome.trim()) return;
 
+    trackButtonClick(projectToEdit ? 'project_modal_save' : 'project_modal_create', 'project_modal', {
+      project_id: projectToEdit?.id,
+      status,
+      priority,
+    });
+    trackProjectEvent(projectToEdit ? 'edit' : 'create', {
+      id: projectToEdit?.id,
+      title: title.trim(),
+      status,
+    });
+
     if (projectToEdit) {
       updateProject(projectToEdit.id, {
         title: title.trim(),
@@ -144,7 +156,10 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              trackButtonClick('project_modal_close', 'project_modal', { project_id: projectToEdit?.id });
+              onClose();
+            }}
             className="p-2 text-gray-400 hover:text-white hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -325,6 +340,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      trackButtonClick('project_modal_delete_confirm', 'project_modal', { project_id: projectToEdit.id });
+                      trackProjectEvent('delete', { id: projectToEdit.id, title: projectToEdit.title });
                       deleteProject(projectToEdit.id);
                       onClose();
                     }}
@@ -334,7 +351,10 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setConfirmDelete(false)}
+                    onClick={() => {
+                      trackButtonClick('project_modal_delete_cancel', 'project_modal');
+                      setConfirmDelete(false);
+                    }}
                     className="px-2.5 py-1.5 text-xs font-semibold text-gray-400 hover:text-white rounded-lg transition-colors cursor-pointer"
                   >
                     Cancel
@@ -343,7 +363,10 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               ) : (
                 <button
                   type="button"
-                  onClick={() => setConfirmDelete(true)}
+                  onClick={() => {
+                    trackButtonClick('project_modal_delete_prompt', 'project_modal');
+                    setConfirmDelete(true);
+                  }}
                   className="px-3 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -357,7 +380,10 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={() => {
+                  trackButtonClick('project_modal_cancel', 'project_modal');
+                  onClose();
+                }}
                 className="px-4 py-2 text-xs font-semibold text-gray-400 hover:text-white hover:bg-[#1E1E1E] rounded-xl transition-colors cursor-pointer"
               >
                 Cancel

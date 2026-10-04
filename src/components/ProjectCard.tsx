@@ -15,6 +15,7 @@ import {
 import { useGTD } from '../context/GTDContext';
 import { GTDProject, GTDAction } from '../types/gtd';
 import { isProjectStalled } from '../utils/projectUtils';
+import { trackButtonClick } from '../services/analytics';
 
 interface ProjectCardProps {
   project: GTDProject;
@@ -56,6 +57,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     const text = inlineAction.trim();
     if (!text) return;
 
+    trackButtonClick('project_card_add_action', 'project_card', { project_id: project.id });
     addAction({
       title: text,
       projectId: project.id,
@@ -69,7 +71,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
 
   return (
     <div
-      onClick={() => setSelectedProjectId(project.id)}
+      onClick={() => {
+        trackButtonClick('project_card_open_detail', 'project_card', { project_id: project.id });
+        setSelectedProjectId(project.id);
+      }}
       className={`bg-[#141414] rounded-2xl border transition-all p-5 flex flex-col justify-between cursor-pointer group shadow-md hover:shadow-xl ${
         isStalled
           ? 'border-amber-700/80 ring-1 ring-amber-800/40'
@@ -134,7 +139,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
               <>
                 <button
                   type="button"
-                  onClick={(e) => onEditProject(project, e)}
+                  onClick={(e) => {
+                    trackButtonClick('project_card_edit_project', 'project_card', { project_id: project.id });
+                    onEditProject(project, e);
+                  }}
                   className="p-1.5 text-gray-500 hover:text-[#C5A47E] hover:bg-[#1E1E1E] rounded-lg cursor-pointer transition-colors"
                   title="Edit project"
                 >
@@ -144,6 +152,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
+                    trackButtonClick('project_card_delete_project', 'project_card', { project_id: project.id });
                     if (e.shiftKey) {
                       onDeleteProject(project);
                     } else {
@@ -236,7 +245,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                 </span>
                 <button
                   type="button"
-                  onClick={() => setIsAddingAction((prev) => !prev)}
+                  onClick={() => {
+                    trackButtonClick('project_card_toggle_inline_action', 'project_card', { project_id: project.id });
+                    setIsAddingAction((prev) => !prev);
+                  }}
                   className="text-[10px] text-gray-400 hover:text-[#C5A47E] flex items-center gap-0.5 cursor-pointer transition-colors"
                   title="Add another action to this project"
                 >
@@ -287,6 +299,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
+                          trackButtonClick('project_card_complete_action', 'project_card', { action_id: act.id, project_id: project.id });
                           toggleActionComplete(act.id);
                         }}
                         className="w-4 h-4 rounded border border-neutral-600 hover:border-[#C5A47E] hover:bg-[#C5A47E]/15 flex items-center justify-center text-transparent hover:text-[#C5A47E] transition-all shrink-0 cursor-pointer group/chk"
@@ -295,7 +308,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                         <Check className="w-2.5 h-2.5 group-hover/chk:scale-110 transition-transform" />
                       </button>
                       <span 
-                        onClick={() => onEditAction(act)}
+                        onClick={() => {
+                          trackButtonClick('project_card_action_click', 'project_card', { action_id: act.id, project_id: project.id });
+                          onEditAction(act);
+                        }}
                         className="truncate font-medium cursor-pointer hover:text-[#C5A47E] transition-colors"
                         title={act.title}
                       >
@@ -311,7 +327,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                       )}
                       <button
                         type="button"
-                        onClick={() => onEditAction(act)}
+                        onClick={() => {
+                          trackButtonClick('project_card_edit_action', 'project_card', { action_id: act.id, project_id: project.id });
+                          onEditAction(act);
+                        }}
                         className="opacity-0 group-hover/action:opacity-100 p-0.5 text-gray-500 hover:text-[#C5A47E] rounded transition-opacity cursor-pointer"
                         title="Edit action"
                       >
@@ -332,6 +351,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
+                          trackButtonClick('project_card_log_routine', 'project_card', { action_id: act.id, project_id: project.id });
                           logRecurringCompletion(act.id);
                         }}
                         className="w-4 h-4 rounded border border-amber-800/60 hover:border-amber-400 hover:bg-amber-400/15 flex items-center justify-center text-amber-500/70 hover:text-amber-300 transition-all shrink-0 cursor-pointer group/chk"
@@ -340,7 +360,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                         <RotateCcw className="w-2.5 h-2.5 group-hover/chk:rotate-180 transition-transform duration-300" />
                       </button>
                       <span 
-                        onClick={() => onEditAction(act)}
+                        onClick={() => {
+                          trackButtonClick('project_card_routine_click', 'project_card', { action_id: act.id, project_id: project.id });
+                          onEditAction(act);
+                        }}
                         className="truncate font-medium text-amber-200 cursor-pointer hover:text-amber-100 transition-colors"
                         title={act.title}
                       >
@@ -355,7 +378,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                       )}
                       <button
                         type="button"
-                        onClick={() => onEditAction(act)}
+                        onClick={() => {
+                          trackButtonClick('project_card_edit_routine', 'project_card', { action_id: act.id, project_id: project.id });
+                          onEditAction(act);
+                        }}
                         className="opacity-0 group-hover/action:opacity-100 p-0.5 text-gray-500 hover:text-[#C5A47E] rounded transition-opacity cursor-pointer"
                         title="Edit routine"
                       >
@@ -369,7 +395,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                 {activeActions.length + recurringActions.length > 2 && (
                   <button
                     type="button"
-                    onClick={() => setSelectedProjectId(project.id)}
+                    onClick={() => {
+                      trackButtonClick('project_card_view_more_actions', 'project_card', { project_id: project.id });
+                      setSelectedProjectId(project.id);
+                    }}
                     className="text-[10px] text-gray-500 hover:text-[#C5A47E] pt-0.5 block w-full text-right cursor-pointer transition-colors"
                   >
                     +{Math.max(0, activeActions.length + recurringActions.length - 2)} more actions • View details →

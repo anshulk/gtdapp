@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { GTDProvider, useGTD } from './context/GTDContext';
+import { trackPageView, trackModalEvent, trackButtonClick } from './services/analytics';
 import { Navbar } from './components/Navbar';
 import { DashboardView } from './components/DashboardView';
 import { HorizonsView } from './components/HorizonsView';
@@ -19,7 +20,9 @@ import {
   Briefcase, 
   CheckCircle2, 
   FileSpreadsheet,
-  Plus 
+  Plus,
+  Heart,
+  ExternalLink
 } from 'lucide-react';
 
 const MainAppContent: React.FC = () => {
@@ -38,9 +41,38 @@ const MainAppContent: React.FC = () => {
     setQuickCaptureOpen,
     nextActionsCount,
     stalledProjects,
+    daysSinceLastReview,
+    isReviewDue,
     syncConflictNotice,
     dismissSyncConflict,
   } = useGTD();
+
+  // Track view-level transitions with system health metadata
+  useEffect(() => {
+    trackPageView(activeTab, {
+      next_actions_count: nextActionsCount,
+      stalled_projects_count: stalledProjects.length,
+      days_since_review: daysSinceLastReview,
+      is_review_due: isReviewDue,
+    });
+  }, [activeTab, nextActionsCount, stalledProjects.length, daysSinceLastReview, isReviewDue]);
+
+  // Track modal open events
+  useEffect(() => {
+    if (mindSweepOpen) trackModalEvent('mind_sweep', 'open');
+  }, [mindSweepOpen]);
+
+  useEffect(() => {
+    if (weeklyReviewOpen) trackModalEvent('weekly_review', 'open');
+  }, [weeklyReviewOpen]);
+
+  useEffect(() => {
+    if (authModalOpen) trackModalEvent('google_auth_sheets', 'open');
+  }, [authModalOpen]);
+
+  useEffect(() => {
+    if (installModalOpen) trackModalEvent('pwa_install', 'open');
+  }, [installModalOpen]);
 
   return (
     <div className="min-h-screen bg-[#0F0F0F] text-gray-300 flex flex-col font-sans selection:bg-[#C5A47E] selection:text-black">
@@ -59,13 +91,19 @@ const MainAppContent: React.FC = () => {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setAuthModalOpen(true)}
+                onClick={() => {
+                  trackButtonClick('conflict_view_sheets', 'sync_conflict_banner');
+                  setAuthModalOpen(true);
+                }}
                 className="text-[11px] font-semibold text-[#C5A47E] hover:underline cursor-pointer"
               >
                 View Sheets Hub
               </button>
               <button
-                onClick={dismissSyncConflict}
+                onClick={() => {
+                  trackButtonClick('conflict_dismiss', 'sync_conflict_banner');
+                  dismissSyncConflict();
+                }}
                 className="text-gray-400 hover:text-white px-1.5 py-0.5 rounded cursor-pointer"
               >
                 ✕
@@ -88,10 +126,32 @@ const MainAppContent: React.FC = () => {
         </div>
       </main>
 
+      {/* Footer */}
+      <footer className="border-t border-[#1C1C1C] bg-[#0A0A0A] py-5 px-4 text-center text-xs text-gray-500 mb-16 md:mb-0 transition-colors">
+        <div className="max-w-7xl mx-auto flex items-center justify-center gap-1.5 flex-wrap">
+          <span>Made with love</span>
+          <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500 inline-block shrink-0 animate-pulse" />
+          <span>by</span>
+          <a
+            href="https://github.com/anshulk/gtdapp"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => trackButtonClick('footer_github_link', 'footer')}
+            className="text-gray-300 hover:text-[#C5A47E] font-medium transition-colors inline-flex items-center gap-1 underline underline-offset-4 decoration-[#C5A47E]/40 hover:decoration-[#C5A47E]"
+          >
+            <span>anshulk</span>
+            <ExternalLink className="w-3 h-3 text-[#C5A47E]" />
+          </a>
+        </div>
+      </footer>
+
       {/* Mobile-Only Bottom Navigation Bar (Clean, clutter-free, thumb-accessible) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0F0F0F]/95 backdrop-blur-xl border-t border-[#262626] px-2 py-1.5 flex items-center justify-around shadow-2xl safe-bottom">
         <button
-          onClick={() => setActiveTab('dashboard')}
+          onClick={() => {
+            trackButtonClick('mobile_nav_cockpit', 'mobile_bottom_nav');
+            setActiveTab('dashboard');
+          }}
           className={`flex-1 flex flex-col items-center justify-center py-1 text-[10px] font-bold cursor-pointer transition-colors ${
             activeTab === 'dashboard' ? 'text-[#C5A47E]' : 'text-gray-400 hover:text-gray-200'
           }`}
@@ -101,7 +161,10 @@ const MainAppContent: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('horizons')}
+          onClick={() => {
+            trackButtonClick('mobile_nav_horizons', 'mobile_bottom_nav');
+            setActiveTab('horizons');
+          }}
           className={`flex-1 flex flex-col items-center justify-center py-1 text-[10px] font-bold cursor-pointer transition-colors ${
             activeTab === 'horizons' ? 'text-[#C5A47E]' : 'text-gray-400 hover:text-gray-200'
           }`}
@@ -113,7 +176,10 @@ const MainAppContent: React.FC = () => {
         {/* Center Minimal Quick Capture CTA */}
         <div className="flex-1 flex items-center justify-center py-0.5">
           <button
-            onClick={() => setQuickCaptureOpen(true)}
+            onClick={() => {
+              trackButtonClick('mobile_nav_quick_capture', 'mobile_bottom_nav');
+              setQuickCaptureOpen(true);
+            }}
             className="w-8 h-8 rounded-lg bg-[#C5A47E] text-black flex items-center justify-center shadow-xs cursor-pointer hover:bg-[#b8946e] active:scale-95 transition-all"
             title="Quick Capture (Inbox)"
             aria-label="Quick Capture"
@@ -123,7 +189,10 @@ const MainAppContent: React.FC = () => {
         </div>
 
         <button
-          onClick={() => setActiveTab('projects')}
+          onClick={() => {
+            trackButtonClick('mobile_nav_projects', 'mobile_bottom_nav');
+            setActiveTab('projects');
+          }}
           className={`flex-1 flex flex-col items-center justify-center py-1 text-[10px] font-bold cursor-pointer transition-colors relative ${
             activeTab === 'projects' ? 'text-[#C5A47E]' : 'text-gray-400 hover:text-gray-200'
           }`}
@@ -139,7 +208,10 @@ const MainAppContent: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('actions')}
+          onClick={() => {
+            trackButtonClick('mobile_nav_actions', 'mobile_bottom_nav');
+            setActiveTab('actions');
+          }}
           className={`flex-1 flex flex-col items-center justify-center py-1 text-[10px] font-bold cursor-pointer transition-colors relative ${
             (activeTab === 'actions' || activeTab === 'inbox' || activeTab === 'waiting' || activeTab === 'someday')
               ? 'text-[#C5A47E]'

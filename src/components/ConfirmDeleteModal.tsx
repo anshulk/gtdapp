@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Trash2, X } from 'lucide-react';
+import { trackButtonClick } from '../services/analytics';
 
 interface ConfirmDeleteModalProps {
   isOpen: boolean;
@@ -35,7 +36,10 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
             <h3 className="text-base font-bold text-white font-serif">{title}</h3>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              trackButtonClick('confirm_delete_close', 'confirm_delete_modal', { title });
+              onClose();
+            }}
             className="p-1.5 text-gray-400 hover:text-white hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -52,7 +56,10 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
         <div className="p-4 border-t border-[#262626] bg-[#111111] flex items-center justify-end gap-2.5">
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              trackButtonClick('confirm_delete_cancel', 'confirm_delete_modal', { title });
+              onClose();
+            }}
             className="px-3.5 py-2 text-xs font-semibold text-gray-400 hover:text-white hover:bg-[#1C1C1C] rounded-xl transition-colors cursor-pointer"
           >
             Cancel
@@ -60,6 +67,7 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
           <button
             type="button"
             onClick={() => {
+              trackButtonClick('confirm_delete_proceed', 'confirm_delete_modal', { title });
               onConfirm();
               onClose();
             }}

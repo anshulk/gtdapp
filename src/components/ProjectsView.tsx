@@ -36,6 +36,7 @@ import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { ActionEditModal } from './ActionEditModal';
 import { ProjectCard } from './ProjectCard';
 import { isProjectStalled } from '../utils/projectUtils';
+import { trackButtonClick, trackFilterChange, trackSubView } from '../services/analytics';
 
 interface ProjectParentGroup {
   id: string;
@@ -75,6 +76,17 @@ export const ProjectsView: React.FC = () => {
   const [projectToEdit, setProjectToEdit] = useState<GTDProject | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<GTDProject | null>(null);
   const [editingAction, setEditingAction] = useState<GTDAction | null>(null);
+
+  // Track sub-view engagement
+  useEffect(() => {
+    trackSubView('projects', statusFilter, {
+      domain_filter: domainFilter,
+      area_filter: areaFilter,
+      goal_filter: goalFilter,
+      group_by_parent: groupByParent,
+      total_projects: projects.length,
+    });
+  }, [statusFilter]);
 
   // Grouping by parent state
   const [groupByParent, setGroupByParent] = useState<boolean>(true);
@@ -124,6 +136,7 @@ export const ProjectsView: React.FC = () => {
 
   const handleUndoDelete = () => {
     if (undoToast) {
+      trackButtonClick('projects_undo_delete', 'projects_toast', { project_id: undoToast.project.id });
       restoreProject(undoToast.project, undoToast.linkedActionIds);
       setUndoToast(null);
     }
@@ -152,6 +165,7 @@ export const ProjectsView: React.FC = () => {
   }, [projects, statusFilter, areaFilter, goalFilter, domainFilter, horizonItems, search]);
 
   const handleOpenAddModal = (defaultAreaId?: string, defaultGoalId?: string) => {
+    trackButtonClick('projects_create_button', 'projects_header', { default_area_id: defaultAreaId, default_goal_id: defaultGoalId });
     setProjectToEdit(null);
     setDefaultParentAreaId(defaultAreaId);
     setDefaultParentGoalId(defaultGoalId);
@@ -287,7 +301,10 @@ export const ProjectsView: React.FC = () => {
               return (
                 <button
                   key={st}
-                  onClick={() => setStatusFilter(st)}
+                  onClick={() => {
+                    trackButtonClick(`projects_status_tab_${st}`, 'projects_status_bar', { status: st });
+                    setStatusFilter(st);
+                  }}
                   className={`px-2.5 py-1 rounded-lg font-semibold transition-all capitalize whitespace-nowrap cursor-pointer ${
                     statusFilter === st
                       ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
@@ -309,7 +326,10 @@ export const ProjectsView: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <select
               value={domainFilter}
-              onChange={(e) => setDomainFilter(e.target.value)}
+              onChange={(e) => {
+                trackFilterChange('domain', e.target.value, 'projects');
+                setDomainFilter(e.target.value);
+              }}
               className="px-3 py-1.5 bg-[#141414] border border-[#262626] rounded-xl text-gray-300 text-xs focus:bg-[#191919] focus:outline-hidden focus:border-[#C5A47E]"
             >
               <option value="all">All Life Domains</option>
@@ -322,7 +342,10 @@ export const ProjectsView: React.FC = () => {
 
             <select
               value={areaFilter}
-              onChange={(e) => setAreaFilter(e.target.value)}
+              onChange={(e) => {
+                trackFilterChange('area', e.target.value, 'projects');
+                setAreaFilter(e.target.value);
+              }}
               className="px-3 py-1.5 bg-[#141414] border border-[#262626] rounded-xl text-gray-300 text-xs focus:bg-[#191919] focus:outline-hidden focus:border-[#C5A47E]"
             >
               <option value="all">All Areas of Focus (H2)</option>
@@ -335,7 +358,10 @@ export const ProjectsView: React.FC = () => {
 
             <select
               value={goalFilter}
-              onChange={(e) => setGoalFilter(e.target.value)}
+              onChange={(e) => {
+                trackFilterChange('goal', e.target.value, 'projects');
+                setGoalFilter(e.target.value);
+              }}
               className="px-3 py-1.5 bg-[#141414] border border-[#262626] rounded-xl text-gray-300 text-xs focus:bg-[#191919] focus:outline-hidden focus:border-[#C5A47E]"
             >
               <option value="all">All Goals (H3)</option>
@@ -358,7 +384,10 @@ export const ProjectsView: React.FC = () => {
           <div className="bg-[#181818] border border-[#282828] p-0.5 rounded-lg flex items-center gap-1">
             <button
               type="button"
-              onClick={() => setGroupByParent(true)}
+              onClick={() => {
+                trackButtonClick('projects_layout_grouped', 'projects_layout_controls');
+                setGroupByParent(true);
+              }}
               className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
                 groupByParent
                   ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
@@ -370,7 +399,10 @@ export const ProjectsView: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => setGroupByParent(false)}
+              onClick={() => {
+                trackButtonClick('projects_layout_flat', 'projects_layout_controls');
+                setGroupByParent(false);
+              }}
               className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
                 !groupByParent
                   ? 'bg-[#C5A47E] text-black font-bold shadow-xs'
@@ -395,14 +427,20 @@ export const ProjectsView: React.FC = () => {
             <div className="flex items-center gap-1 text-[11px] text-gray-400">
               <button
                 type="button"
-                onClick={expandAllGroups}
+                onClick={() => {
+                  trackButtonClick('projects_expand_all_groups', 'projects_controls');
+                  expandAllGroups();
+                }}
                 className="hover:text-white px-2 py-1 rounded bg-[#181818] border border-[#262626] hover:border-[#383838] transition-colors cursor-pointer"
               >
                 Expand All
               </button>
               <button
                 type="button"
-                onClick={collapseAllGroups}
+                onClick={() => {
+                  trackButtonClick('projects_collapse_all_groups', 'projects_controls');
+                  collapseAllGroups();
+                }}
                 className="hover:text-white px-2 py-1 rounded bg-[#181818] border border-[#262626] hover:border-[#383838] transition-colors cursor-pointer"
               >
                 Collapse All
