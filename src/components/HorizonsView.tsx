@@ -20,7 +20,11 @@ import {
   Network,
   Kanban,
   Tag,
-  Star
+  Star,
+  X,
+  Search,
+  ZoomIn,
+  ZoomOut
 } from 'lucide-react';
 import { useGTD } from '../context/GTDContext';
 import { HORIZON_DEFINITIONS, LIFE_DOMAINS } from '../data/gtdData';
@@ -45,12 +49,37 @@ export const HorizonsView: React.FC = () => {
   const [selectedAltitude, setSelectedAltitude] = useState<number | 'all'>('all');
   const [selectedAreaId, setSelectedAreaId] = useState<string>('all');
   const [selectedLifeDomain, setSelectedLifeDomain] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [collapsedNodes, setCollapsedNodes] = useState<Record<string, boolean>>({});
+  const [zoomScale, setZoomScale] = useState<number>(100);
+  const [showFilters, setShowFilters] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [itemToEdit, setItemToEdit] = useState<HorizonItem | null>(null);
   const [itemToDelete, setItemToDelete] = useState<HorizonItem | null>(null);
   const [defaultLevelForNew, setDefaultLevelForNew] = useState<HorizonLevel>(3);
   const [defaultParentIdForNew, setDefaultParentIdForNew] = useState<string | undefined>(undefined);
   const [viewMode, setViewMode] = useState<'graph' | 'kanban' | 'cards'>('graph');
+
+  const toggleCollapse = (id: string) => {
+    setCollapsedNodes((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const expandAll = () => {
+    trackButtonClick('horizons_expand_all', 'horizons_header');
+    setCollapsedNodes({});
+  };
+
+  const collapseAll = () => {
+    trackButtonClick('horizons_collapse_all', 'horizons_header');
+    const allCollapsed: Record<string, boolean> = {};
+    horizonItems.forEach((h) => {
+      allCollapsed[h.id] = true;
+    });
+    projects.forEach((p) => {
+      allCollapsed[p.id] = true;
+    });
+    setCollapsedNodes(allCollapsed);
+  };
 
   // Track sub-view engagement
   useEffect(() => {
@@ -100,14 +129,26 @@ export const HorizonsView: React.FC = () => {
         if (item.level === 3 && item.parentId !== selectedAreaId) return false;
         if (item.level === 4 || item.level === 5) return false;
       }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const titleMatch = item.title.toLowerCase().includes(q);
+        const descMatch = item.description ? item.description.toLowerCase().includes(q) : false;
+        if (!titleMatch && !descMatch) return false;
+      }
       return true;
     });
-  }, [horizonItems, selectedAltitude, selectedAreaId, selectedLifeDomain]);
+  }, [horizonItems, selectedAltitude, selectedAreaId, selectedLifeDomain, searchQuery]);
+
+  const activeFilterCount =
+    (selectedAltitude !== 'all' ? 1 : 0) +
+    (selectedLifeDomain !== 'all' ? 1 : 0) +
+    (selectedAreaId !== 'all' ? 1 : 0) +
+    (searchQuery.trim() ? 1 : 0);
 
   return (
     <div className="space-y-8 pb-16">
       
-      {/* Header Banner */}
+      {/* Header Banner - Merged Top Card with View Mode, Graph Controls, Filter Button & Add Focus */}
       <div className="bg-[#141414] rounded-xl border border-[#262626] p-3 sm:p-4 shadow-md">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 flex-wrap">
@@ -167,6 +208,29 @@ export const HorizonsView: React.FC = () => {
               </button>
             </div>
 
+            {/* Filter Toggle Button (Icon only) */}
+            <button
+              type="button"
+              onClick={() => {
+                trackButtonClick('horizons_toggle_filters', 'horizons_header', { open: !showFilters });
+                setShowFilters((prev) => !prev);
+              }}
+              className={`p-2 rounded-lg text-xs font-semibold border flex items-center justify-center relative transition-all cursor-pointer ${
+                showFilters || activeFilterCount > 0
+                  ? 'bg-[#C5A47E]/15 border-[#C5A47E] text-[#C5A47E] shadow-xs'
+                  : 'bg-[#1E1E1E] border-[#262626] text-gray-300 hover:text-white hover:bg-[#252525]'
+              }`}
+              title={showFilters ? "Hide Filters" : "Filter Horizons"}
+              aria-label="Filter Horizons"
+            >
+              <Filter className="w-4 h-4" />
+              {activeFilterCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-[#C5A47E] text-black font-bold text-[10px] flex items-center justify-center font-mono ring-2 ring-[#141414]">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+
             <button
               onClick={() => handleOpenAddModal(3)}
               className="px-3 py-1.5 bg-[#C5A47E] hover:bg-[#b8946e] active:bg-[#a8845e] text-black text-xs font-bold rounded-lg shadow-xs transition-all flex items-center gap-1 cursor-pointer shrink-0"
@@ -177,75 +241,186 @@ export const HorizonsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Filter Ribbons for Cards View */}
-        {viewMode === 'cards' && (
-          <div className="mt-3 pt-3 border-t border-[#202020] flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-            {/* Altitude Level Selector */}
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-bold text-gray-500 uppercase tracking-wider text-[11px] mr-1">
-                Altitude:
+        {/* Second Row: Graph Controls (Collapse All, Expand All, Zoom) */}
+        {viewMode === 'graph' && (
+          <div className="mt-3 pt-3 border-t border-[#202020] flex flex-wrap items-center justify-between gap-2.5 text-xs animate-fadeIn">
+            {/* Left: Collapse All & Expand All */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider mr-1">
+                Branches:
               </span>
-              <button
-                onClick={() => {
-                  trackButtonClick('horizons_altitude_all', 'horizons_cards_filter');
-                  trackFilterChange('altitude', 'all', 'horizons');
-                  setSelectedAltitude('all');
-                }}
-                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                  selectedAltitude === 'all'
-                    ? 'bg-[#C5A47E] text-black shadow-xs'
-                    : 'bg-[#181818] text-gray-400 hover:bg-[#202020] hover:text-gray-200 border border-[#262626]'
-                }`}
-              >
-                All Levels
-              </button>
-              {([5, 4, 3, 2] as HorizonLevel[]).map((lvl) => {
-                const def = HORIZON_DEFINITIONS[lvl];
-                const count = horizonItems.filter((i) => i.level === lvl).length;
-                const isSelected = selectedAltitude === lvl;
-
-                return (
-                  <button
-                    key={lvl}
-                    onClick={() => {
-                      trackButtonClick(`horizons_altitude_h${lvl}`, 'horizons_cards_filter', { level: lvl });
-                      trackFilterChange('altitude', `H${lvl}`, 'horizons');
-                      setSelectedAltitude(lvl);
-                    }}
-                    className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                      isSelected
-                        ? `${def.color.badge} shadow-xs font-extrabold`
-                        : 'bg-[#181818] text-gray-400 hover:bg-[#202020] hover:text-gray-200 border border-[#262626]'
-                    }`}
-                  >
-                    <span>H{lvl}</span>
-                    <span className="text-[10px] opacity-70 font-mono">({count})</span>
-                  </button>
-                );
-              })}
+              <div className="flex items-center gap-1 bg-[#1E1E1E] border border-[#262626] p-0.5 rounded-lg">
+                <button
+                  type="button"
+                  onClick={collapseAll}
+                  className="px-2.5 py-1 hover:bg-[#282828] text-gray-300 hover:text-white rounded-md transition-colors cursor-pointer font-medium"
+                  title="Collapse all branches"
+                >
+                  <span>Collapse All</span>
+                </button>
+                <span className="text-gray-600">|</span>
+                <button
+                  type="button"
+                  onClick={expandAll}
+                  className="px-2.5 py-1 hover:bg-[#282828] text-gray-300 hover:text-white rounded-md transition-colors cursor-pointer font-medium"
+                  title="Expand all branches"
+                >
+                  <span>Expand All</span>
+                </button>
+              </div>
             </div>
 
-            {/* Life Domain Filter for Cards View */}
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-gray-500 uppercase tracking-wider text-[11px] flex items-center gap-1">
-                <Tag className="w-3 h-3 text-[#C5A47E]" />
-                <span>Domain:</span>
+            {/* Right: Zoom Controls */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider mr-1">
+                Zoom:
               </span>
-              <select
-                value={selectedLifeDomain}
-                onChange={(e) => {
-                  trackFilterChange('domain', e.target.value, 'horizons');
-                  setSelectedLifeDomain(e.target.value);
-                }}
-                className="px-3 py-1.5 bg-[#181818] border border-[#262626] rounded-xl text-xs text-gray-200 focus:outline-hidden focus:border-[#C5A47E]"
-              >
-                <option value="all">All Life Domains</option>
-                {LIFE_DOMAINS.map((domain) => (
-                  <option key={domain} value={domain}>
-                    {domain}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center gap-0.5 bg-[#1E1E1E] border border-[#262626] rounded-lg p-0.5 text-xs shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setZoomScale((prev) => Math.max(75, prev - 10))}
+                  className="p-1 text-gray-400 hover:text-white rounded cursor-pointer"
+                  title="Zoom out"
+                >
+                  <ZoomOut className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setZoomScale(100)}
+                  className="text-[10px] font-mono px-1.5 text-gray-300 hover:text-[#C5A47E] min-w-[36px] text-center cursor-pointer"
+                  title="Reset zoom to 100%"
+                >
+                  {zoomScale}%
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setZoomScale((prev) => Math.min(125, prev + 10))}
+                  className="p-1 text-gray-400 hover:text-white rounded cursor-pointer"
+                  title="Zoom in"
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Collapsible Filter Panel on Top Card */}
+        {showFilters && (
+          <div className="mt-3 pt-3 border-t border-[#202020] animate-fadeIn flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+            {/* Search Input & Life Domain Filter */}
+            <div className="flex flex-wrap items-center gap-2.5 flex-1">
+              <div className="relative flex-1 min-w-[200px] max-w-sm">
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={
+                    viewMode === 'graph'
+                      ? 'Filter graph nodes...'
+                      : viewMode === 'kanban'
+                      ? 'Filter Kanban items...'
+                      : 'Filter horizon cards...'
+                  }
+                  className="pl-8 pr-7 py-1.5 bg-[#181818] border border-[#262626] rounded-lg text-xs text-gray-200 placeholder-gray-500 focus:outline-hidden focus:border-[#C5A47E] w-full"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-xs cursor-pointer"
+                    title="Clear search"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-gray-400 uppercase tracking-wider text-[11px] flex items-center gap-1">
+                  <Tag className="w-3 h-3 text-[#C5A47E]" />
+                  <span>Domain:</span>
+                </span>
+                <select
+                  value={selectedLifeDomain}
+                  onChange={(e) => {
+                    trackFilterChange('domain', e.target.value, 'horizons');
+                    setSelectedLifeDomain(e.target.value);
+                  }}
+                  className="px-2.5 py-1 bg-[#181818] border border-[#262626] rounded-lg text-xs text-gray-200 focus:outline-hidden focus:border-[#C5A47E]"
+                >
+                  <option value="all">All Domains</option>
+                  {LIFE_DOMAINS.map((domain) => (
+                    <option key={domain} value={domain}>
+                      {domain}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Altitude Selector & Reset */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-bold text-gray-400 uppercase tracking-wider text-[11px] mr-1">
+                  Altitude:
+                </span>
+                <button
+                  onClick={() => {
+                    trackButtonClick('horizons_altitude_all', 'horizons_filter');
+                    trackFilterChange('altitude', 'all', 'horizons');
+                    setSelectedAltitude('all');
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    selectedAltitude === 'all'
+                      ? 'bg-[#C5A47E] text-black shadow-xs'
+                      : 'bg-[#181818] text-gray-400 hover:bg-[#202020] hover:text-gray-200 border border-[#262626]'
+                  }`}
+                >
+                  All
+                </button>
+                {([5, 4, 3, 2] as HorizonLevel[]).map((lvl) => {
+                  const def = HORIZON_DEFINITIONS[lvl];
+                  const count = horizonItems.filter((i) => i.level === lvl).length;
+                  const isSelected = selectedAltitude === lvl;
+
+                  return (
+                    <button
+                      key={lvl}
+                      onClick={() => {
+                        trackButtonClick(`horizons_altitude_h${lvl}`, 'horizons_filter', { level: lvl });
+                        trackFilterChange('altitude', `H${lvl}`, 'horizons');
+                        setSelectedAltitude(lvl);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                        isSelected
+                          ? `${def.color.badge} shadow-xs font-extrabold ring-1 ring-[#C5A47E]`
+                          : 'bg-[#181818] text-gray-400 hover:bg-[#202020] hover:text-gray-200 border border-[#262626]'
+                      }`}
+                    >
+                      <span>H{lvl}</span>
+                      <span className="text-[10px] opacity-70 font-mono">({count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {activeFilterCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    trackButtonClick('horizons_clear_filters', 'horizons_filter');
+                    setSelectedAltitude('all');
+                    setSelectedLifeDomain('all');
+                    setSelectedAreaId('all');
+                    setSearchQuery('');
+                  }}
+                  className="px-2.5 py-1 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 border border-rose-800/40 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" />
+                  <span>Reset</span>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -422,6 +597,16 @@ export const HorizonsView: React.FC = () => {
           onOpenAddModal={handleOpenAddModal}
           onOpenEditModal={handleOpenEditModal}
           onDeletePrompt={handleDeletePrompt}
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          selectedDomain={selectedLifeDomain}
+          onSelectedDomainChange={setSelectedLifeDomain}
+          collapsedNodes={collapsedNodes}
+          onToggleCollapse={toggleCollapse}
+          zoomScale={zoomScale}
+          onZoomChange={setZoomScale}
+          onExpandAll={expandAll}
+          onCollapseAll={collapseAll}
         />
       )}
 

@@ -46,6 +46,16 @@ interface HorizonsMapProps {
   onOpenEditModal: (item: HorizonItem) => void;
   onDeletePrompt: (item: HorizonItem) => void;
   activeLayout?: 'graph-view' | 'altitude-cascade';
+  searchQuery?: string;
+  onSearchQueryChange?: (query: string) => void;
+  selectedDomain?: string;
+  onSelectedDomainChange?: (domain: string) => void;
+  collapsedNodes?: Record<string, boolean>;
+  onToggleCollapse?: (id: string) => void;
+  zoomScale?: number;
+  onZoomChange?: (scale: number | ((prev: number) => number)) => void;
+  onExpandAll?: () => void;
+  onCollapseAll?: () => void;
 }
 
 export const HorizonsMap: React.FC<HorizonsMapProps> = ({
@@ -53,6 +63,16 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
   onOpenEditModal,
   onDeletePrompt,
   activeLayout = 'graph-view',
+  searchQuery: externalSearchQuery,
+  onSearchQueryChange,
+  selectedDomain: externalSelectedDomain,
+  onSelectedDomainChange,
+  collapsedNodes: externalCollapsedNodes,
+  onToggleCollapse: externalToggleCollapse,
+  zoomScale: externalZoomScale,
+  onZoomChange,
+  onExpandAll,
+  onCollapseAll,
 }) => {
   const {
     horizonItems = [],
@@ -75,12 +95,23 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
     }
   }, [activeLayout]);
 
-  // Filters & State
-  const [selectedDomain, setSelectedDomain] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  // Filters & State (with internal state fallbacks)
+  const [internalDomain, setInternalDomain] = useState<string>('all');
+  const [internalSearchQuery, setInternalSearchQuery] = useState<string>('');
   const [selectedH5Id, setSelectedH5Id] = useState<string>('all');
-  const [collapsedNodes, setCollapsedNodes] = useState<Record<string, boolean>>({});
-  const [zoomScale, setZoomScale] = useState<number>(100);
+  const [internalCollapsedNodes, setInternalCollapsedNodes] = useState<Record<string, boolean>>({});
+  const [internalZoomScale, setInternalZoomScale] = useState<number>(100);
+
+  const selectedDomain = externalSelectedDomain !== undefined ? externalSelectedDomain : internalDomain;
+  const setSelectedDomain = onSelectedDomainChange || setInternalDomain;
+
+  const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : internalSearchQuery;
+  const setSearchQuery = onSearchQueryChange || setInternalSearchQuery;
+
+  const collapsedNodes = externalCollapsedNodes !== undefined ? externalCollapsedNodes : internalCollapsedNodes;
+
+  const zoomScale = externalZoomScale !== undefined ? externalZoomScale : internalZoomScale;
+  const setZoomScale = onZoomChange || setInternalZoomScale;
 
   // Cascade View Selection & Hover State for Focus Filter & Connecting Lines
   const [selectedCascadeItem, setSelectedCascadeItem] = useState<{
@@ -118,22 +149,34 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
   const [projectToDelete, setProjectToDelete] = useState<GTDProject | null>(null);
 
   const toggleCollapse = (id: string) => {
-    setCollapsedNodes((prev) => ({ ...prev, [id]: !prev[id] }));
+    if (externalToggleCollapse) {
+      externalToggleCollapse(id);
+    } else {
+      setInternalCollapsedNodes((prev) => ({ ...prev, [id]: !prev[id] }));
+    }
   };
 
   const expandAll = () => {
-    setCollapsedNodes({});
+    if (onExpandAll) {
+      onExpandAll();
+    } else {
+      setInternalCollapsedNodes({});
+    }
   };
 
   const collapseAll = () => {
-    const allCollapsed: Record<string, boolean> = {};
-    horizonItems.forEach((h) => {
-      allCollapsed[h.id] = true;
-    });
-    projects.forEach((p) => {
-      allCollapsed[p.id] = true;
-    });
-    setCollapsedNodes(allCollapsed);
+    if (onCollapseAll) {
+      onCollapseAll();
+    } else {
+      const allCollapsed: Record<string, boolean> = {};
+      horizonItems.forEach((h) => {
+        allCollapsed[h.id] = true;
+      });
+      projects.forEach((p) => {
+        allCollapsed[p.id] = true;
+      });
+      setInternalCollapsedNodes(allCollapsed);
+    }
   };
 
   // Group horizons by level
@@ -1117,6 +1160,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
   }, [activeCascadeId, h5Purposes, h4Visions, h2Areas, h3Goals, projects]);
 
   // Position state for SVG connecting paths in Altitude Cascade
+  const [cardsBounds, setCardsBounds] = useState<{ top: number; height: number }>({ top: 0, height: 1000 });
   const [computedLines, setComputedLines] = useState<Array<{
     id: string;
     d: string;
@@ -1141,6 +1185,33 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
       const container = cascadeContainerRef.current;
       if (!container) return;
       const cRect = container.getBoundingClientRect();
+
+      // Measure the visible vertical window of the kanban cards area (scroll containers)
+      const scrollContainers = container.querySelectorAll<HTMLElement>('.cascade-scroll-container');
+      let minCardsTop = 0;
+      let maxCardsBottom = cRect.height;
+
+      if (scrollContainers.length > 0) {
+        let minT = Infinity;
+        let maxB = -Infinity;
+        scrollContainers.forEach((sc) => {
+          const scRect = sc.getBoundingClientRect();
+          const topRel = scRect.top - cRect.top;
+          const bottomRel = scRect.bottom - cRect.top;
+          if (topRel < minT) minT = topRel;
+          if (bottomRel > maxB) maxB = bottomRel;
+        });
+
+        if (minT !== Infinity && maxB !== -Infinity) {
+          minCardsTop = Math.max(0, minT);
+          maxCardsBottom = maxB;
+          setCardsBounds({
+            top: minCardsTop,
+            height: Math.max(0, maxCardsBottom - minCardsTop),
+          });
+        }
+      }
+
       const newLines: Array<{
         id: string;
         d: string;
@@ -1161,6 +1232,9 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
 
         if (!fromEl || !toEl) return;
 
+        const fromScrollParent = fromEl.closest('.cascade-scroll-container') as HTMLElement | null;
+        const toScrollParent = toEl.closest('.cascade-scroll-container') as HTMLElement | null;
+
         const fromRect = fromEl.getBoundingClientRect();
         const toRect = toEl.getBoundingClientRect();
 
@@ -1168,6 +1242,15 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
         let startY = fromRect.top + fromRect.height / 2 - cRect.top;
         let endX = 0;
         let endY = toRect.top + toRect.height / 2 - cRect.top;
+
+        // Skip only if BOTH endpoints are completely outside the cards view on the same side
+        // (if both are far above or both are far below, the line never enters the cards view)
+        if (
+          (startY < minCardsTop - 50 && endY < minCardsTop - 50) ||
+          (startY > maxCardsBottom + 50 && endY > maxCardsBottom + 50)
+        ) {
+          return;
+        }
 
         if (fromRect.left < toRect.left) {
           // Left-to-right columns (tucked slightly under cards)
@@ -1239,7 +1322,13 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
     if (mapLayout !== 'altitude-cascade' || !activeCascadeId || !cascadeContainerRef.current) return;
 
     const container = cascadeContainerRef.current;
-    const targetIds = Array.from(activeConnectedIds);
+
+    // In horizon kanban view, don't try to keep H5 card in focus, prioritize H4 card
+    const h5IdSet = new Set(h5Purposes.map((p) => p.id));
+    const h4IdSet = new Set(h4Visions.map((v) => v.id));
+
+    // Exclude H5 cards from auto-scroll targeting completely so H5 does not hijack focus
+    const targetIds = Array.from(activeConnectedIds).filter((id) => !h5IdSet.has(id));
     if (targetIds.length === 0) return;
 
     // Identify the scrollable list container on which the mouse is currently hovering (if any)
@@ -1249,7 +1338,18 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
       hoveredScrollParent = hoveredEl?.closest('.cascade-scroll-container') as HTMLElement | null;
     }
 
-    targetIds.forEach((id) => {
+    // Sort targetIds so that H4 items are prioritized first when scrolling
+    const prioritizedIds = [...targetIds].sort((a, b) => {
+      const aIsH4 = h4IdSet.has(a);
+      const bIsH4 = h4IdSet.has(b);
+      if (aIsH4 && !bIsH4) return -1;
+      if (!aIsH4 && bIsH4) return 1;
+      return 0;
+    });
+
+    const scrolledContainers = new Set<HTMLElement>();
+
+    prioritizedIds.forEach((id) => {
       // Never auto-scroll the hovered item itself
       if (hoveredCascadeItemId && id === hoveredCascadeItemId) return;
 
@@ -1257,6 +1357,11 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
       if (el) {
         const scrollParent = el.closest('.cascade-scroll-container') as HTMLElement | null;
         if (scrollParent) {
+          // If this scroll container was already scrolled for a higher-priority item (e.g. H4), don't scroll it again
+          if (scrolledContainers.has(scrollParent)) {
+            return;
+          }
+
           // Do not auto scroll the list on which the mouse is hovering
           const isHoveredList =
             (hoveredScrollParent && (scrollParent === hoveredScrollParent || scrollParent.contains(hoveredScrollParent))) ||
@@ -1274,6 +1379,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
           const isBelow = elRect.bottom > parentRect.bottom - 16;
 
           if (isAbove || isBelow) {
+            scrolledContainers.add(scrollParent);
             el.scrollIntoView({
               behavior: 'smooth',
               block: 'nearest',
@@ -1299,108 +1405,10 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
     return () => {
       if (animFrame) cancelAnimationFrame(animFrame);
     };
-  }, [activeCascadeId, activeConnectedIds, mapLayout, hoveredCascadeItemId]);
+  }, [activeCascadeId, activeConnectedIds, mapLayout, hoveredCascadeItemId, h5Purposes, h4Visions]);
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      
-      {/* Control Panel Toolbar */}
-      <div className="bg-[#141414] rounded-2xl border border-[#262626] p-3 sm:p-5 shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
-        
-        {/* Left: Contextual Controls (Expand/Collapse for Graph, Sort by Parent for Kanban) */}
-        <div className="flex flex-wrap items-center justify-between sm:justify-start gap-2 sm:gap-3">
-          {mapLayout === 'graph-view' ? (
-            /* Expand / Collapse All */
-            <div className="flex items-center gap-1 text-xs">
-              <button
-                onClick={expandAll}
-                className="px-2 sm:px-2.5 py-1.5 bg-[#191919] hover:bg-[#222] border border-[#262626] rounded-xl text-gray-300 text-xs font-medium transition-colors cursor-pointer"
-                title="Expand all branches"
-              >
-                <span className="sm:hidden">Expand</span>
-                <span className="hidden sm:inline">Expand All</span>
-              </button>
-              <button
-                onClick={collapseAll}
-                className="px-2 sm:px-2.5 py-1.5 bg-[#191919] hover:bg-[#222] border border-[#262626] rounded-xl text-gray-300 text-xs font-medium transition-colors cursor-pointer"
-                title="Collapse all branches"
-              >
-                <span className="sm:hidden">Collapse</span>
-                <span className="hidden sm:inline">Collapse All</span>
-              </button>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Right: Filters & Zoom */}
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3">
-          
-          {/* Search Box */}
-          <div className="relative flex-1 sm:flex-initial w-full sm:w-auto">
-            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={mapLayout === 'altitude-cascade' ? "Filter Kanban items..." : "Filter graph nodes..."}
-              className="pl-8 pr-3 py-1.5 bg-[#191919] border border-[#262626] rounded-xl text-xs text-gray-200 placeholder-gray-500 focus:outline-hidden focus:border-[#C5A47E] w-full sm:w-44 md:w-52"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-xs"
-              >
-                ×
-              </button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-start">
-            {/* Life Domain Filter Dropdown */}
-            <div className="flex items-center gap-1.5 text-xs flex-1 sm:flex-initial">
-              <Tag className="w-3.5 h-3.5 text-[#C5A47E] shrink-0" />
-              <select
-                value={selectedDomain}
-                onChange={(e) => setSelectedDomain(e.target.value)}
-                className="px-2.5 sm:px-3 py-1.5 bg-[#191919] border border-[#262626] rounded-xl text-xs text-gray-200 focus:outline-hidden focus:border-[#C5A47E] w-full sm:w-auto"
-              >
-                <option value="all">All Domains</option>
-                {LIFE_DOMAINS.map((domain) => (
-                  <option key={domain} value={domain}>
-                    {domain}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Zoom Controls (Graph view only) */}
-            {mapLayout === 'graph-view' && (
-              <div className="flex items-center gap-0.5 sm:gap-1 bg-[#191919] border border-[#262626] rounded-xl p-0.5 text-xs shrink-0">
-                <button
-                  onClick={() => setZoomScale((prev) => Math.max(75, prev - 10))}
-                  className="p-1 text-gray-400 hover:text-white rounded cursor-pointer"
-                  title="Zoom out"
-                >
-                  <ZoomOut className="w-3.5 h-3.5" />
-                </button>
-                <span className="text-[10px] font-mono px-1 text-gray-400 min-w-[28px] sm:min-w-[32px] text-center">
-                  {zoomScale}%
-                </span>
-                <button
-                  onClick={() => setZoomScale((prev) => Math.min(125, prev + 10))}
-                  className="p-1 text-gray-400 hover:text-white rounded cursor-pointer"
-                  title="Zoom in"
-                >
-                  <ZoomIn className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-          </div>
-
-        </div>
-
-      </div>
-
       {/* GRAPH VIEW: CENTRAL H5 NODE GRAPH */}
       {mapLayout === 'graph-view' ? (
         <div 
@@ -2354,10 +2362,13 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
           {/* 4-Column Cascade Layout with Active Connecting SVG Overlay */}
           <div ref={cascadeContainerRef} className="relative grid grid-cols-1 lg:grid-cols-4 gap-6 isolate">
             
-            {/* SVG Connecting Lines Overlay - Rendered under cards (z-0) */}
+            {/* SVG Connecting Lines Overlay - Rendered under cards (z-10) and clipped strictly to cards view */}
             {computedLines.length > 0 && (
-              <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible hidden lg:block">
+              <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-hidden hidden lg:block">
                 <defs>
+                  <clipPath id="cascade-cards-view-clip">
+                    <rect x="0" y={cardsBounds.top} width="100%" height={cardsBounds.height} />
+                  </clipPath>
                   <linearGradient id="cascade-grad-gold" x1="0%" y1="0%" x2="100%" y2="100%">
                     <stop offset="0%" stopColor="#C5A47E" stopOpacity="0.9" />
                     <stop offset="100%" stopColor="#818cf8" stopOpacity="0.9" />
@@ -2390,54 +2401,56 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                     </feMerge>
                   </filter>
                 </defs>
-                {computedLines.map((line) => (
-                  <g key={line.id}>
-                    {/* Subtler outer ambient glow */}
-                    <path
-                      d={line.d}
-                      fill="none"
-                      stroke={'url(#' + line.gradientId + ')'}
-                      strokeWidth="3.5"
-                      strokeOpacity="0.12"
-                      filter="url(#cascade-line-glow)"
-                      strokeLinecap="round"
-                    />
-                    {/* Solid, thinner, refined core connecting line */}
-                    <path
-                      d={line.d}
-                      fill="none"
-                      stroke={'url(#' + line.gradientId + ')'}
-                      strokeWidth="1.25"
-                      strokeOpacity="0.75"
-                      strokeLinecap="round"
-                      className="transition-all duration-200"
-                    />
-                    {/* Subtle terminal origin node dot */}
-                    <circle cx={line.startX} cy={line.startY} r="2.5" fill={line.startColor} fillOpacity="0.85" />
-                    {/* Subtle terminal target node dot */}
-                    <circle cx={line.endX} cy={line.endY} r="2.5" fill={line.endColor} fillOpacity="0.85" />
-                  </g>
-                ))}
+                <g clipPath="url(#cascade-cards-view-clip)">
+                  {computedLines.map((line) => (
+                    <g key={line.id}>
+                      {/* Subtler outer ambient glow */}
+                      <path
+                        d={line.d}
+                        fill="none"
+                        stroke={'url(#' + line.gradientId + ')'}
+                        strokeWidth="3.5"
+                        strokeOpacity="0.12"
+                        filter="url(#cascade-line-glow)"
+                        strokeLinecap="round"
+                      />
+                      {/* Solid, thinner, refined core connecting line */}
+                      <path
+                        d={line.d}
+                        fill="none"
+                        stroke={'url(#' + line.gradientId + ')'}
+                        strokeWidth="1.25"
+                        strokeOpacity="0.75"
+                        strokeLinecap="round"
+                        className="transition-all duration-200"
+                      />
+                      {/* Subtle terminal origin node dot */}
+                      <circle cx={line.startX} cy={line.startY} r="2.5" fill={line.startColor} fillOpacity="0.85" />
+                      {/* Subtle terminal target node dot */}
+                      <circle cx={line.endX} cy={line.endY} r="2.5" fill={line.endColor} fillOpacity="0.85" />
+                    </g>
+                  ))}
+                </g>
               </svg>
             )}
 
             {/* Column 1: Horizon 5 & 4 */}
             <div className="space-y-3 flex flex-col">
-              <div className="bg-[#141414] rounded-2xl border border-[#262626] p-4 flex items-center justify-between shadow-md shrink-0 relative z-20">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-[#C5A47E]/20 text-[#C5A47E] border border-[#C5A47E]/30">
-                    <Compass className="w-4 h-4" />
+              <div className="bg-[#141414] rounded-2xl border border-[#262626] px-4 py-3 h-[72px] flex items-center justify-between shadow-md shrink-0 relative z-20">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="p-1.5 rounded-lg bg-[#C5A47E]/20 text-[#C5A47E] border border-[#C5A47E]/30 shrink-0">
+                    <Compass className="w-4 h-4 shrink-0" />
                   </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-white font-serif uppercase tracking-wider">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-xs font-bold text-white font-serif uppercase tracking-wider truncate" title="H5 Purpose & H4 Vision">
                       H5 Purpose & H4 Vision
                     </h3>
-                    <span className="text-[10px] text-[#C5A47E] font-mono">50k+ & 40k ft</span>
+                    <span className="text-[10px] text-[#C5A47E] font-mono block truncate">50k+ & 40k ft</span>
                   </div>
                 </div>
                 <button
                   onClick={() => onOpenAddModal(4)}
-                  className="p-1 text-gray-400 hover:text-[#C5A47E] rounded cursor-pointer"
+                  className="p-1.5 text-gray-400 hover:text-[#C5A47E] hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer shrink-0 ml-1"
                   title="Add Vision"
                 >
                   <Plus className="w-4 h-4" />
@@ -2445,6 +2458,15 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
               </div>
 
               <div className="cascade-scroll-container no-scrollbar space-y-3 max-h-[620px] overflow-y-auto scroll-smooth">
+                {cascadeFilteredData.h5s.length > 0 && (
+                  <div className="flex items-center gap-2 pb-0.5 px-1">
+                    <span className="text-[10px] font-bold text-[#C5A47E]/80 font-mono uppercase tracking-wider">
+                      H5 Purpose ({cascadeFilteredData.h5s.length})
+                    </span>
+                    <div className="flex-1 h-px bg-[#C5A47E]/15" />
+                  </div>
+                )}
+
                 {cascadeFilteredData.h5s.map((p) => {
                   const isSelected = selectedCascadeItem?.id === p.id && selectedCascadeItem.type === 'h5';
                   const isHovered = hoveredCascadeItemId === p.id;
@@ -2458,7 +2480,7 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                       onMouseEnter={() => setHoveredCascadeItemId(p.id)}
                       onMouseLeave={() => setHoveredCascadeItemId(null)}
                       onClick={() => handleCascadeItemClick(p.id, 'h5')}
-                      className={'rounded-2xl p-4 space-y-2 cursor-pointer transition-all duration-200 relative z-20 ' + (
+                      className={'rounded-2xl p-3 sm:p-3.5 space-y-1.5 cursor-pointer transition-all duration-200 relative z-20 ' + (
                         isSelected
                           ? 'bg-[#1a1714] border-2 border-[#C5A47E] shadow-lg shadow-[#C5A47E]/15 ring-2 ring-[#C5A47E]/30'
                           : isHovered
@@ -2508,6 +2530,15 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
                     </div>
                   );
                 })}
+
+                {cascadeFilteredData.h4s.length > 0 && (
+                  <div className="flex items-center gap-2 pt-1 pb-0.5 px-1">
+                    <span className="text-[10px] font-bold text-indigo-400 font-mono uppercase tracking-wider">
+                      H4 Vision ({cascadeFilteredData.h4s.length})
+                    </span>
+                    <div className="flex-1 h-px bg-indigo-950/60" />
+                  </div>
+                )}
 
                 {cascadeFilteredData.h4s.map((v) => {
                   const isSelected = selectedCascadeItem?.id === v.id && selectedCascadeItem.type === 'h4';
@@ -2598,21 +2629,21 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
 
             {/* Column 2: Horizon 2 (Areas of Focus) */}
             <div className="space-y-3 flex flex-col">
-              <div className="bg-[#141414] rounded-2xl border border-[#262626] p-4 flex items-center justify-between shadow-md shrink-0 relative z-20">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-emerald-950/80 text-emerald-400 border border-emerald-800/40">
-                    <ShieldCheck className="w-4 h-4" />
+              <div className="bg-[#141414] rounded-2xl border border-[#262626] px-4 py-3 h-[72px] flex items-center justify-between shadow-md shrink-0 relative z-20">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="p-1.5 rounded-lg bg-emerald-950/80 text-emerald-400 border border-emerald-800/40 shrink-0">
+                    <ShieldCheck className="w-4 h-4 shrink-0" />
                   </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-white font-serif uppercase tracking-wider">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-xs font-bold text-white font-serif uppercase tracking-wider truncate" title="H2 • Areas of Focus">
                       H2 • Areas of Focus
                     </h3>
-                    <span className="text-[10px] text-emerald-400/90 font-mono">20,000 ft Roles</span>
+                    <span className="text-[10px] text-emerald-400/90 font-mono block truncate">20,000 ft Roles</span>
                   </div>
                 </div>
                 <button
                   onClick={() => onOpenAddModal(2)}
-                  className="p-1 text-gray-400 hover:text-emerald-400 rounded cursor-pointer"
+                  className="p-1.5 text-gray-400 hover:text-emerald-400 hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer shrink-0 ml-1"
                   title="Add Area of Focus"
                 >
                   <Plus className="w-4 h-4" />
@@ -2728,21 +2759,21 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
 
             {/* Column 3: Horizon 3 (Goals) */}
             <div className="space-y-3 flex flex-col">
-              <div className="bg-[#141414] rounded-2xl border border-[#262626] p-4 flex items-center justify-between shadow-md shrink-0 relative z-20">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-sky-950/80 text-sky-300 border border-sky-800/40">
-                    <Target className="w-4 h-4" />
+              <div className="bg-[#141414] rounded-2xl border border-[#262626] px-4 py-3 h-[72px] flex items-center justify-between shadow-md shrink-0 relative z-20">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="p-1.5 rounded-lg bg-sky-950/80 text-sky-300 border border-sky-800/40 shrink-0">
+                    <Target className="w-4 h-4 shrink-0" />
                   </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-white font-serif uppercase tracking-wider">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-xs font-bold text-white font-serif uppercase tracking-wider truncate" title="H3 • 1-2y Goals">
                       H3 • 1-2y Goals
                     </h3>
-                    <span className="text-[10px] text-sky-300/90 font-mono">30,000 ft Targets</span>
+                    <span className="text-[10px] text-sky-300/90 font-mono block truncate">30,000 ft Targets</span>
                   </div>
                 </div>
                 <button
                   onClick={() => onOpenAddModal(3)}
-                  className="p-1 text-gray-400 hover:text-sky-300 rounded cursor-pointer"
+                  className="p-1.5 text-gray-400 hover:text-sky-300 hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer shrink-0 ml-1"
                   title="Add Goal"
                 >
                   <Plus className="w-4 h-4" />
@@ -2839,21 +2870,21 @@ export const HorizonsMap: React.FC<HorizonsMapProps> = ({
 
             {/* Column 4: H1 Projects & Runway */}
             <div className="space-y-3 flex flex-col">
-              <div className="bg-[#141414] rounded-2xl border border-[#262626] p-4 flex items-center justify-between shadow-md shrink-0 relative z-20">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-amber-950/80 text-amber-300 border border-amber-800/40">
-                    <Briefcase className="w-4 h-4" />
+              <div className="bg-[#141414] rounded-2xl border border-[#262626] px-4 py-3 h-[72px] flex items-center justify-between shadow-md shrink-0 relative z-20">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="p-1.5 rounded-lg bg-amber-950/80 text-amber-300 border border-amber-800/40 shrink-0">
+                    <Briefcase className="w-4 h-4 shrink-0" />
                   </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-white font-serif uppercase tracking-wider">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-xs font-bold text-white font-serif uppercase tracking-wider truncate" title="H1 Projects & Runway">
                       H1 Projects & Runway
                     </h3>
-                    <span className="text-[10px] text-amber-300/90 font-mono">10k ft & Ground</span>
+                    <span className="text-[10px] text-amber-300/90 font-mono block truncate">10k ft & Ground</span>
                   </div>
                 </div>
                 <button
                   onClick={() => handleOpenAddProject()}
-                  className="p-1 text-gray-400 hover:text-amber-300 rounded cursor-pointer"
+                  className="p-1.5 text-gray-400 hover:text-amber-300 hover:bg-[#1E1E1E] rounded-lg transition-colors cursor-pointer shrink-0 ml-1"
                   title="Add New Project"
                 >
                   <Plus className="w-4 h-4" />
